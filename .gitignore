@@ -1,0 +1,15 @@
+/target
+/**/target
+**/*.rs.bk
+
+# Vendored upstream repos are fetched by scripts/setup-external.sh; not committed.
+/external/
+
+# Local run artifacts
+/run
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.iml

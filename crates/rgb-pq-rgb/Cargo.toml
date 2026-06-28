@@ -1,0 +1,26 @@
+[package]
+name = "rgb-pq-rgb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "RGB-PQ real RGB integration glue (issuance, transfer, consignment)"
+
+[dependencies]
+rgb-pq-core = { path = "../rgb-pq-core" }
+rgb-pq-seal = { path = "../rgb-pq-seal" }
+rgb-pq-commit = { path = "../rgb-pq-commit" }
+rgb-pq-chain = { path = "../rgb-pq-chain" }
+rgb-consensus = { workspace = true }
+rgb-ops = { workspace = true }
+bitcoin = { workspace = true }
+hex = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

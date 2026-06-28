@@ -1,0 +1,29 @@
+[package]
+name = "rgb-pq-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "RGB-PQ local end-to-end tests"
+publish = false
+
+[dependencies]
+rgb-pq-core = { path = "../../crates/rgb-pq-core" }
+rgb-pq-seal = { path = "../../crates/rgb-pq-seal" }
+rgb-pq-commit = { path = "../../crates/rgb-pq-commit" }
+rgb-pq-chain = { path = "../../crates/rgb-pq-chain" }
+rgb-pq-resolver = { path = "../../crates/rgb-pq-resolver" }
+rgb-pq-rgb = { path = "../../crates/rgb-pq-rgb" }
+rgb-pq-tx = { path = "../../crates/rgb-pq-tx" }
+bitcoin = { workspace = true }
+hex = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = "0.11"
+
+[features]
+default = []
+
+[lints]
+workspace = true
