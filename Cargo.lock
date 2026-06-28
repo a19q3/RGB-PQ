@@ -1215,6 +1215,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rgb-pq-bench"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "rgb-pq-chain",
+ "rgb-pq-commit",
+ "rgb-pq-core",
+ "rgb-pq-resolver",
+ "rgb-pq-seal",
+]
+
+[[package]]
 name = "rgb-pq-chain"
 version = "0.1.0"
 dependencies = [

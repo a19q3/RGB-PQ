@@ -166,12 +166,23 @@ pub enum CommitmentPayload {
 impl CommitmentPayload {
     /// Scan a transaction's outputs (as scriptPubKey bytes + vout) for RGB-PQ
     /// commitments. `opret_outputs` is an iterator of `(vout, script_pubkey)`.
+    ///
+    /// Enforces a conservative scan window + per-output size bound to defend
+    /// against malicious huge-output transactions; outputs beyond the bound are
+    /// ignored (fail safe → treated as not-a-commitment).
     pub fn scan<'a, I>(opret_outputs: I) -> Self
     where
         I: IntoIterator<Item = (u32, &'a [u8])>,
     {
+        const MAX_SCAN: usize = 64;
+        const MAX_SPK: usize = 4096;
         let mut hits: Vec<(u32, RgbPqCommitment)> = Vec::new();
+        let mut scanned = 0usize;
         for (vout, spk) in opret_outputs {
+            scanned += 1;
+            if scanned > MAX_SCAN || spk.len() > MAX_SPK {
+                break;
+            }
             if let Some(payload) = strip_op_return(spk) {
                 if let Ok(c) = RgbPqCommitment::decode(payload) {
                     hits.push((vout, c));

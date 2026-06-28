@@ -42,7 +42,7 @@
 
 use sha2::{Digest, Sha256};
 
-use rgb_pq_core::{CommitmentError, Domain, RgbPqResult};
+use rgb_pq_core::{CommitmentError, Domain, RgbPqResult, VerifyLimits};
 use rgb_pq_seal::{BtqChainId, BtqP2mrSeal};
 
 use crate::commitment::MpcCommitment;
@@ -291,12 +291,29 @@ pub fn build_p2mr_ret_tree_for_seal(
 /// This recomputes the commitment leaf from `seal.chain_id` + `mpc` (the leaf
 /// does not depend on the outpoint), derives the expected root from the PQ
 /// leaf, and checks it equals `seal.p2mr_root`.
+///
+/// Enforces [`VerifyLimits::DEFAULT`] on tree depth, leaf/control/witness
+/// sizes. Fails closed (`Err`) on any breach.
 pub fn verify_p2mr_ret(
     seal: &BtqP2mrSeal,
     mpc: MpcCommitment,
     pq_leaf_script: &[u8],
 ) -> RgbPqResult<()> {
+    verify_p2mr_ret_bounded(seal, mpc, pq_leaf_script, &VerifyLimits::DEFAULT)
+}
+
+/// Bounded variant of [`verify_p2mr_ret`] with an explicit [`VerifyLimits`].
+pub fn verify_p2mr_ret_bounded(
+    seal: &BtqP2mrSeal,
+    mpc: MpcCommitment,
+    pq_leaf_script: &[u8],
+    limits: &VerifyLimits,
+) -> RgbPqResult<()> {
+    // DoS-defence bounds on the PQ leaf and (later) witness material.
+    limits.check_leaf_size(pq_leaf_script.len())?;
     let tree = build_p2mr_ret_tree_for_seal(seal.chain_id, mpc, pq_leaf_script);
+    limits.check_tree_depth(tree.commitment_leaf.depth as u32)?;
+    limits.check_leaf_size(tree.commitment_leaf.script.len())?;
     // 1. The seal's root must equal the tree's root.
     if tree.root != seal.p2mr_root {
         return Err(CommitmentError::Malformed(format!(

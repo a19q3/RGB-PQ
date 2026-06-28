@@ -16,6 +16,7 @@
 
 pub mod domain;
 pub mod error;
+pub mod limits;
 
 pub use domain::{Domain, DOMAIN_SEPARATION_VERSION, DOMAIN_TAG};
 pub use error::{
@@ -23,6 +24,7 @@ pub use error::{
     MalformedSealError, NodeUnavailable, OwnerAlgoError, ResolveError, RgbPqError, RpcError,
     SealError, SealStateError, UnknownSealStateReason, UnsupportedFeature,
 };
+pub use limits::{BudgetGuard, DoSError, VerifyLimits};
 
 /// Convenience alias for the crate's fallible return type.
 pub type RgbPqResult<T> = core::result::Result<T, RgbPqError>;

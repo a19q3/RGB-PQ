@@ -145,6 +145,26 @@ spending it requires breaking Dilithium.*
 - Always validate a received consignment with `validate_consignment(...)` using
   a resolver you control before accepting state.
 
+### 12a. DoS / verification-budget defence
+
+A malicious peer can hand the verifier huge P2MR trees, malformed leaves,
+repeated commitments, oversized witnesses, or many candidate closing txs to
+burn CPU. RGB-PQ treats this as a security boundary, not a performance nice-to-
+have:
+
+- All verification paths enforce `VerifyLimits` (max tree depth, leaf/control/
+  witness size, candidate spends, scan window, resolver wall-clock time). See
+  `docs/verification-budget.md` for the table and defaults.
+- On any breach the verifier **fails closed** → `SealState::Unknown` or
+  `ClosedInvalid`, **never** `ClosedValid`. `SealResolver::resolve` wraps work
+  in a `BudgetGuard` and maps `DoSError` to `Unknown`.
+- **Verification latency is measured separately from finality latency.** The
+  former is bounded by these limits + benchmarked (`rgb-pq-bench`); the latter
+  by `ConfirmationPolicy`. They are never conflated into a vague timeout.
+- The dominant cost is **PQ witness size** (Dilithium2 sig ≈ 2420 B, pk ≈ 1312
+  B; Dilithium5 sig ≈ 4627 B), not the P2MR Merkle path (which is O(depth) and
+  trivial). `max_witness_size` bounds this.
+
 ## 13. Stale proof risk & address reuse
 
 - A consignment + its witness anchors can go **stale** if the chain reorgs past

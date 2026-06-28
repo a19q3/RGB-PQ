@@ -16,7 +16,8 @@ pub mod resolver;
 pub mod witness;
 
 pub use resolver::{
-    is_pq_owner_algo, spends_outpoint_decoded, verify_commitment_in_outputs, verify_p2mr_output,
-    CommitmentScan, SealResolver, SealState,
+    is_pq_owner_algo, spends_outpoint_decoded, verify_commitment_in_outputs,
+    verify_commitment_in_outputs_bounded, verify_p2mr_output, CommitmentScan, SealResolver,
+    SealState,
 };
 pub use witness::{BtqWitnessResolver, ChainNetMapping};

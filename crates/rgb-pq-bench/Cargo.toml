@@ -1,0 +1,27 @@
+[package]
+name = "rgb-pq-bench"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "RGB-PQ verification-latency microbenchmarks (separate from finality)"
+publish = false
+
+[dependencies]
+rgb-pq-core = { path = "../rgb-pq-core" }
+rgb-pq-seal = { path = "../rgb-pq-seal" }
+rgb-pq-commit = { path = "../rgb-pq-commit" }
+rgb-pq-resolver = { path = "../rgb-pq-resolver" }
+rgb-pq-chain = { path = "../rgb-pq-chain" }
+hex = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

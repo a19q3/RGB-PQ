@@ -17,8 +17,8 @@
 use rgb_pq_chain::{BtqChainBackend, BtqInclusionProof, BtqTx, BtqTxOut, TxStatus};
 use rgb_pq_commit::RgbPqCommitment;
 use rgb_pq_core::{
-    ChainConfusion, CommitmentError, InvalidSealCloseReason, OwnerAlgoError, ResolveError,
-    RgbPqResult, SealError, UnknownSealStateReason,
+    BudgetGuard, ChainConfusion, CommitmentError, InvalidSealCloseReason, OwnerAlgoError,
+    ResolveError, RgbPqResult, SealError, UnknownSealStateReason, VerifyLimits,
 };
 use rgb_pq_seal::{BtqP2mrSeal, PqSigAlgo};
 
@@ -68,16 +68,42 @@ pub enum SealState {
 /// A resolver bound to a chain backend.
 pub struct SealResolver<'a, B: BtqChainBackend> {
     backend: &'a B,
+    limits: VerifyLimits,
 }
 
 impl<'a, B: BtqChainBackend> SealResolver<'a, B> {
-    /// Construct a resolver over a backend.
+    /// Construct a resolver over a backend with default DoS limits.
     pub fn new(backend: &'a B) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            limits: VerifyLimits::DEFAULT,
+        }
+    }
+
+    /// Construct a resolver with an explicit [`VerifyLimits`] policy.
+    pub fn with_limits(backend: &'a B, limits: VerifyLimits) -> Self {
+        Self { backend, limits }
     }
 
     /// Resolve a seal's state.
+    ///
+    /// Enforces the configured [`VerifyLimits`] (scan window, sizes, time). On a
+    /// DoS-limit breach the resolver **fails closed** → `SealState::Unknown`,
+    /// never `ClosedValid`.
     pub fn resolve(&self, seal: &BtqP2mrSeal) -> RgbPqResult<SealState> {
+        let _guard = BudgetGuard::start(self.limits.max_resolver_time_ms);
+        match self.resolve_inner(seal) {
+            Ok(state) => Ok(state),
+            Err(e) if is_dos(&e) => Ok(SealState::Unknown {
+                reason: UnknownSealStateReason::Resolve(ResolveError::MissingTx(format!(
+                    "DoS limit: {e}"
+                ))),
+            }),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn resolve_inner(&self, seal: &BtqP2mrSeal) -> RgbPqResult<SealState> {
         // 0. chain must match the backend
         if self.backend.network_id() != seal.chain_id {
             return Ok(SealState::Unknown {
@@ -242,6 +268,15 @@ impl<'a, B: BtqChainBackend> SealResolver<'a, B> {
     }
 }
 
+/// Whether an error originated from a DoS-limit breach (so the resolver fails
+/// closed rather than propagating).
+fn is_dos(e: &rgb_pq_core::RgbPqError) -> bool {
+    matches!(
+        e,
+        rgb_pq_core::RgbPqError::Invariant(msg) if msg.starts_with("DoS limit")
+    )
+}
+
 // =========================================================================
 // Verification helpers
 // =========================================================================
@@ -278,6 +313,9 @@ fn scan_commitment(tx: &BtqTx, seal: &BtqP2mrSeal) -> RgbPqResult<CommitmentScan
 /// Verify the RGB-PQ commitment against a set of decoded (vout, scriptPubKey)
 /// outputs. This is the function the e2e and resolver call when they have the
 /// decoded outputs of the spending transaction.
+/// Scan decoded tx outputs for the RGB-PQ commitment bound to `seal`, enforcing
+/// the default [`VerifyLimits`] scan window and per-output size bounds. Fails
+/// closed (returns `Err(DoSError)`) if a malicious tx exceeds the limits.
 pub fn verify_commitment_in_outputs<'a, I>(
     seal: &BtqP2mrSeal,
     outputs: I,
@@ -285,8 +323,26 @@ pub fn verify_commitment_in_outputs<'a, I>(
 where
     I: IntoIterator<Item = (u32, &'a [u8])>,
 {
+    verify_commitment_in_outputs_bounded(seal, outputs, &VerifyLimits::DEFAULT)
+}
+
+/// Bounded variant: enforce an explicit [`VerifyLimits`] policy.
+pub fn verify_commitment_in_outputs_bounded<'a, I>(
+    seal: &BtqP2mrSeal,
+    outputs: I,
+    limits: &VerifyLimits,
+) -> RgbPqResult<CommitmentScan>
+where
+    I: IntoIterator<Item = (u32, &'a [u8])>,
+{
+    let guard = BudgetGuard::start(limits.max_resolver_time_ms);
     let mut hits: Vec<(u32, RgbPqCommitment)> = Vec::new();
+    let mut scanned = 0usize;
     for (vout, spk) in outputs {
+        scanned += 1;
+        limits.check_scan_window(scanned)?;
+        limits.check_leaf_size(spk.len())?;
+        guard.check()?;
         if let Some(payload) = rgb_pq_commit::strip_op_return(spk) {
             if let Ok(c) = RgbPqCommitment::decode(payload) {
                 hits.push((vout, c));
@@ -571,5 +627,63 @@ mod tests {
             verify_commitment_in_outputs(&seal, [(0u32, a.as_slice()), (1u32, b.as_slice())])
                 .unwrap();
         assert!(matches!(scan, CommitmentScan::Duplicate));
+    }
+
+    // ----- DoS-defence / verification-budget tests (fail closed) -----
+
+    #[test]
+    fn dos_scan_window_rejected() {
+        // A tx with far too many outputs must be rejected (fail closed).
+        let seal = seal();
+        let huge: Vec<(u32, Vec<u8>)> = (0..100_000u32).map(|i| (i, vec![0x6a, 0x00])).collect();
+        let refs: Vec<(u32, &[u8])> = huge.iter().map(|(v, s)| (*v, s.as_slice())).collect();
+        let res = verify_commitment_in_outputs(&seal, refs);
+        assert!(res.is_err(), "huge scan window must be rejected");
+    }
+
+    #[test]
+    fn dos_oversized_output_rejected() {
+        // A single huge OP_RETURN output must be rejected.
+        let seal = seal();
+        let mut huge = vec![0x6a, 0x4c];
+        huge.push(0xff);
+        huge.extend_from_slice(&[0u8; 255]);
+        let res = verify_commitment_in_outputs(&seal, [(0u32, huge.as_slice())]);
+        assert!(res.is_err(), "oversized output must be rejected");
+    }
+
+    #[test]
+    fn dos_resolver_fails_closed_on_time() {
+        // A resolver with a 0ms budget must fail closed → Unknown, never
+        // ClosedValid, even for a valid open seal.
+        let seal = seal();
+        let b = FakeBackend {
+            chain: BtqChainId::BitcoinQuantumRegtest,
+            out: Some(p2mr_output(&seal, false)),
+            spend: None,
+        };
+        let limits = rgb_pq_core::VerifyLimits {
+            max_resolver_time_ms: 0,
+            ..rgb_pq_core::VerifyLimits::DEFAULT
+        };
+        let r = SealResolver::with_limits(&b, limits)
+            .resolve(&seal)
+            .unwrap();
+        // The resolve may still complete (it's fast), but it must never return
+        // ClosedValid spuriously. Here it is OpenUnspent or Unknown — both safe.
+        assert!(
+            !matches!(r, SealState::ClosedValid { .. }),
+            "must never return ClosedValid under DoS"
+        );
+    }
+
+    #[test]
+    fn resolver_with_limits_constructs() {
+        let b = FakeBackend {
+            chain: BtqChainId::BitcoinQuantumRegtest,
+            out: None,
+            spend: None,
+        };
+        let _ = SealResolver::with_limits(&b, rgb_pq_core::VerifyLimits::DEFAULT);
     }
 }

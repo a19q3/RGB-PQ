@@ -8,6 +8,7 @@ members = [
     "crates/rgb-pq-resolver",
     "crates/rgb-pq-rgb",
     "crates/rgb-pq-tx",
+    "crates/rgb-pq-bench",
     "tests/rgb-pq-e2e",
 ]
 # Vendored upstream repos are path-deps, NOT workspace members (each has its own
