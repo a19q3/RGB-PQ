@@ -3,7 +3,9 @@
 //! These vectors pin the canonical binary encoding, textual encoding, and
 //! digest so that any change to the encoding is a breaking, reviewed change.
 
-use crate::types::{BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo, SealVersion};
+use crate::types::{
+    BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo, SealVersion,
+};
 use crate::BtqP2mrSeal;
 use hex::FromHex;
 
@@ -43,7 +45,7 @@ fn binary_vector_matches() {
     // non-semantic byte changes, but still pin the prefix.
     assert!(hex.starts_with("52474250515345414c00")); // "RGBPQSEAL" + version 0
     assert!(hex.contains("72676270713a7630")); // "rgbpq:v0" present
-    // round-trip
+                                               // round-trip
     let dec = BtqP2mrSeal::from_binary(&enc).unwrap();
     assert_eq!(dec, vector_seal());
 }

@@ -12,7 +12,6 @@
 
 use std::num::NonZeroU32;
 
-use bitcoin::hashes::Hash;
 use bitcoin::Transaction as Tx;
 
 use rgbcore::validation::{ResolveWitness, WitnessResolverError, WitnessStatus};
@@ -48,7 +47,7 @@ impl ChainNetMapping {
 
     /// The expected genesis chain-hash for the stand-in (per RGB's
     /// `ChainNet::chain_hash()`). The BTQ backend's own genesis hash is checked
-    /// separately via [`BtqRpcClient::verify_network`].
+    /// separately via `BtqRpcClient::verify_network` (in `rgb-pq-chain`).
     pub fn stand_in_chain_hash(chain: BtqChainId) -> [u8; 32] {
         let bytes = Self::chain_net(chain).chain_hash().to_bytes();
         let mut out = [0u8; 32];
@@ -90,10 +89,10 @@ impl<'a, B: BtqChainBackend> ResolveWitness for BtqWitnessResolver<'a, B> {
             .map_err(|e| self.map_err(e))?;
         let ord = match status {
             rgb_pq_chain::TxStatus::Confirmed { height, time, .. } => {
-                let h = NonZeroU32::new(height)
-                    .ok_or(WitnessResolverError::InvalidResolverData)?;
+                let h = NonZeroU32::new(height).ok_or(WitnessResolverError::InvalidResolverData)?;
                 WitnessOrd::Mined(
-                    WitnessPos::bitcoin(h, time).ok_or(WitnessResolverError::InvalidResolverData)?,
+                    WitnessPos::bitcoin(h, time)
+                        .ok_or(WitnessResolverError::InvalidResolverData)?,
                 )
             }
             rgb_pq_chain::TxStatus::Unconfirmed => WitnessOrd::Tentative,
@@ -164,10 +163,16 @@ mod tests {
             fn get_tx_status(&self, _: &str) -> RgbPqResult<rgb_pq_chain::TxStatus> {
                 unreachable!()
             }
-            fn get_output(&self, _: &rgb_pq_seal::BtqOutpoint) -> RgbPqResult<Option<rgb_pq_chain::BtqTxOut>> {
+            fn get_output(
+                &self,
+                _: &rgb_pq_seal::BtqOutpoint,
+            ) -> RgbPqResult<Option<rgb_pq_chain::BtqTxOut>> {
                 unreachable!()
             }
-            fn get_spending_tx(&self, _: &rgb_pq_seal::BtqOutpoint) -> RgbPqResult<Option<rgb_pq_chain::BtqTx>> {
+            fn get_spending_tx(
+                &self,
+                _: &rgb_pq_seal::BtqOutpoint,
+            ) -> RgbPqResult<Option<rgb_pq_chain::BtqTx>> {
                 unreachable!()
             }
             fn prove_tx_inclusion(&self, _: &str) -> RgbPqResult<rgb_pq_chain::BtqInclusionProof> {

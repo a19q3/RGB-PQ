@@ -26,7 +26,7 @@ use std::path::PathBuf;
 
 use bitcoin::Txid;
 use rgb_pq_chain::{BtqRpcClient, BtqRpcConfig};
-use rgb_pq_commit::{RgbPqCommitment, MpcCommitment};
+use rgb_pq_commit::{MpcCommitment, RgbPqCommitment};
 use rgb_pq_resolver::{verify_commitment_in_outputs, CommitmentScan};
 use rgb_pq_rgb::{chain_net_for, issue_nia_to_btq_seal, DemoAssetSpec};
 use rgb_pq_seal::{
@@ -43,10 +43,7 @@ pub fn nia_kit_path() -> PathBuf {
 pub fn demo_seal() -> BtqP2mrSeal {
     BtqP2mrSeal::new(
         BtqChainId::BitcoinQuantumRegtest,
-        BtqOutpoint::new(
-            BtqTxid::from_bytes([0x11; 32]),
-            0,
-        ),
+        BtqOutpoint::new(BtqTxid::from_bytes([0x11; 32]), 0),
         [0x22; 32],
         [0x33; 32],
         PqSigAlgo::Dilithium2,
@@ -147,13 +144,16 @@ pub fn run_offline_flow() -> usize {
     let decoded = RgbPqCommitment::decode_for(&payload, &seal).unwrap();
     assert_eq!(decoded.mpc, mpc);
     steps += 1;
-    println!("[e2e] commitment bound + verified ({} bytes)", payload.len());
+    println!(
+        "[e2e] commitment bound + verified ({} bytes)",
+        payload.len()
+    );
 
     // 9. resolver verifies the commitment present in (synthetic) outputs
     //    (Component 6).
     use bitcoin::script::PushBytesBuf;
     let mut pb = PushBytesBuf::new();
-    pb.extend_from_slice(&payload);
+    let _ = pb.extend_from_slice(&payload);
     let spk = bitcoin::script::Builder::new()
         .push_opcode(bitcoin::opcodes::all::OP_RETURN)
         .push_slice(pb)

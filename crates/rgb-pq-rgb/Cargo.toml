@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "RGB-PQ real RGB integration glue (issuance, transfer, consignment)"
 
 [dependencies]
@@ -13,9 +17,9 @@ rgb-pq-seal = { path = "../rgb-pq-seal" }
 rgb-pq-commit = { path = "../rgb-pq-commit" }
 rgb-pq-chain = { path = "../rgb-pq-chain" }
 rgb-pq-resolver = { path = "../rgb-pq-resolver" }
-rgbcore = { package = "rgb-consensus", workspace = true }
-rgbstd = { package = "rgb-ops", workspace = true, features = ["fs"] }
-schemata = { package = "rgb-schemas", workspace = true }
+rgb-consensus = { workspace = true }
+rgb-ops = { workspace = true, features = ["fs"] }
+rgb-schemas = { workspace = true }
 bitcoin = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }

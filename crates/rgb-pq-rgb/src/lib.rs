@@ -5,7 +5,7 @@
 //!   * load the official NIA (Non-Inflatable Asset) schema kit;
 //!   * issue a real NIA asset whose beneficiary owner-seal is a BTQ P2MR seal;
 //!   * validate a consignment against an arbitrary `ResolveWitness` (which, in
-//!     RGB-PQ, is the BTQ-backed [`BtqWitnessResolver`]).
+//!     RGB-PQ, is the BTQ-backed `BtqWitnessResolver` in `rgb-pq-resolver`).
 //!
 //! Nothing here is mocked: this exercises the actual RGB consensus issuance
 //! and validation code paths. See `ARCHITECTURE.md` §3.4 and the NIA example
@@ -114,9 +114,9 @@ pub fn load_nia_kit(nia_kit_path: &Path) -> RgbPqResult<ValidKit> {
         .map_err(|e| rgb_pq_core::RgbPqError::RgbValidation(format!("load NIA kit: {e}")))?;
     // KitValidationError is an empty (infallible) enum; validation cannot fail,
     // but we route it through Debug for completeness.
-    let valid = kit.validate().map_err(|e| {
-        rgb_pq_core::RgbPqError::RgbValidation(format!("validate NIA kit: {e:?}"))
-    })?;
+    let valid = kit
+        .validate()
+        .map_err(|e| rgb_pq_core::RgbPqError::RgbValidation(format!("validate NIA kit: {e:?}")))?;
     Ok(valid)
 }
 
@@ -204,7 +204,7 @@ pub fn chain_net_for(seal: &BtqP2mrSeal) -> ChainNet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rgb_pq_seal::{BtqChainId};
+    use rgb_pq_seal::BtqChainId;
 
     /// Locate the vendored NIA kit. In CI/tests the external repos are cloned
     /// by `scripts/setup-external.sh`.

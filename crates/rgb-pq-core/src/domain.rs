@@ -39,7 +39,10 @@ impl<'a> Domain<'a> {
 
     /// Construct the canonical P2MR domain for a chain name.
     pub fn p2mr(chain: &'a str) -> Self {
-        Self { chain, seal_type: Self::P2MR_SEAL_TYPE }
+        Self {
+            chain,
+            seal_type: Self::P2MR_SEAL_TYPE,
+        }
     }
 
     /// Write the fixed domain prefix into `buf`. Returns the number of bytes

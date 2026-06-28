@@ -292,6 +292,9 @@ impl CommitmentLocator {
     }
 }
 
+// Intentionally hand-written: the default is OpretFirst (not the enum's first
+// variant), so derive(Default) would not match.
+#[allow(clippy::derivable_impls)]
 impl Default for CommitmentLocator {
     fn default() -> Self {
         CommitmentLocator::OpretFirst
@@ -357,14 +360,16 @@ impl ConfirmationPolicy {
                 buf.copy_from_slice(&bytes[1..5]);
                 Ok((ConfirmationPolicy::Depth(u32::from_le_bytes(buf)), 5))
             }
-            other => Err(UnsupportedFeature::CommitmentLocator(format!(
-                "policy tag {other:#x}"
-            ))
-            .into()),
+            other => {
+                Err(UnsupportedFeature::CommitmentLocator(format!("policy tag {other:#x}")).into())
+            }
         }
     }
 }
 
+// Intentionally hand-written: the default is OneConf (not the enum's first
+// variant), so derive(Default) would not match.
+#[allow(clippy::derivable_impls)]
 impl Default for ConfirmationPolicy {
     fn default() -> Self {
         ConfirmationPolicy::OneConf
@@ -404,7 +409,10 @@ impl BtqOutpoint {
     /// Convert to a `bitcoin::OutPoint` (boundary conversion).
     pub fn to_bitcoin(self) -> Option<bitcoin::OutPoint> {
         let txid = bitcoin::Txid::from_byte_array(self.txid.0);
-        Some(bitcoin::OutPoint { txid, vout: self.vout })
+        Some(bitcoin::OutPoint {
+            txid,
+            vout: self.vout,
+        })
     }
 }
 
@@ -459,13 +467,21 @@ impl FromStr for BtqTxid {
 #[cfg(feature = "serde")]
 mod txid_serde {
     use super::BtqTxid;
-    pub fn serialize<S: serde::Serializer>(v: &BtqTxid, s: S) -> Result<S::Ok, S::Error> {
-        s.collect_str(v)
+    pub fn serialize<S: serde::Serializer>(v: &[u8; 32], s: S) -> Result<S::Ok, S::Error> {
+        // Display-order hex.
+        let mut hex = String::with_capacity(64);
+        for b in v.iter().rev() {
+            use core::fmt::Write;
+            let _ = write!(hex, "{b:02x}");
+        }
+        s.serialize_str(&hex)
     }
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BtqTxid, D::Error> {
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 32], D::Error> {
         use core::str::FromStr;
+        use serde::Deserialize;
         let s = String::deserialize(d)?;
-        BtqTxid::from_str(&s).map_err(serde::de::Error::custom)
+        let t = BtqTxid::from_str(&s).map_err(serde::de::Error::custom)?;
+        Ok(t.0)
     }
 }
 
@@ -481,8 +497,17 @@ mod tests {
 
     #[test]
     fn chain_id_rejects_non_btq_bitcoin() {
-        for s in ["regtest", "testnet3", "testnet4", "signet", "bitcoin-testnet"] {
-            assert!(BtqChainId::from_domain_str(s).is_err(), "{s} should be rejected");
+        for s in [
+            "regtest",
+            "testnet3",
+            "testnet4",
+            "signet",
+            "bitcoin-testnet",
+        ] {
+            assert!(
+                BtqChainId::from_domain_str(s).is_err(),
+                "{s} should be rejected"
+            );
         }
     }
 

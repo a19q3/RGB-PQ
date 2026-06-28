@@ -5,12 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "RGB-PQ RGB transition commitment binder (opret anchor)"
 
 [dependencies]
 rgb-pq-core = { path = "../rgb-pq-core" }
 rgb-pq-seal = { path = "../rgb-pq-seal" }
-rgbcore = { package = "rgb-consensus", workspace = true }
+rgb-consensus = { workspace = true }
 bitcoin = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }

@@ -210,7 +210,7 @@ pub fn strip_op_return(spk: &[u8]) -> Option<&[u8]> {
         let n = rest[1] as usize;
         if rest.len() == 2 + n {
             return Some(&rest[2..]);
-    }
+        }
     }
     None
 }
@@ -337,7 +337,9 @@ mod tests {
     fn build_opret_script(payload: &[u8]) -> Vec<u8> {
         use bitcoin::script::PushBytesBuf;
         let mut buf = PushBytesBuf::new();
-        buf.extend_from_slice(payload);
+        // extend_from_slice on PushBytesBuf returns Result; payloads here are
+        // well within the push limit so this cannot fail, but we honour it.
+        let _ = buf.extend_from_slice(payload);
         let script = bitcoin::script::Builder::new()
             .push_opcode(bitcoin::opcodes::all::OP_RETURN)
             .push_slice(buf)

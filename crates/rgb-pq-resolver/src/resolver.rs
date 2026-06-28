@@ -14,10 +14,8 @@
 //!     transition / seal / chain;
 //!   * confirmation / finality policy is satisfied.
 
-use rgb_pq_chain::{
-    BtqChainBackend, BtqInclusionProof, BtqTx, BtqTxOut, TxStatus,
-};
-use rgb_pq_commit::{RgbPqCommitment, CommitmentPayload};
+use rgb_pq_chain::{BtqChainBackend, BtqInclusionProof, BtqTx, BtqTxOut, TxStatus};
+use rgb_pq_commit::RgbPqCommitment;
 use rgb_pq_core::{
     ChainConfusion, CommitmentError, InvalidSealCloseReason, OwnerAlgoError, ResolveError,
     RgbPqResult, SealError, UnknownSealStateReason,
@@ -206,7 +204,9 @@ impl<'a, B: BtqChainBackend> SealResolver<'a, B> {
         let required = seal.confirmation_policy.required_depth();
         match &spending_tx.status {
             TxStatus::Unconfirmed => {
-                return Ok(SealState::Unconfirmed { txid: spending_txid.clone() });
+                return Ok(SealState::Unconfirmed {
+                    txid: spending_txid.clone(),
+                });
             }
             TxStatus::Confirmed { confirmations, .. } => {
                 if *confirmations < required {
@@ -224,9 +224,11 @@ impl<'a, B: BtqChainBackend> SealResolver<'a, B> {
             Ok(p) => p,
             Err(e) => {
                 return Ok(SealState::Unknown {
-                    reason: UnknownSealStateReason::Resolve(rgb_pq_core::ResolveError::MissingInclusionProof(
-                        format!("{spending_txid}: {e}"),
-                    )),
+                    reason: UnknownSealStateReason::Resolve(
+                        rgb_pq_core::ResolveError::MissingInclusionProof(format!(
+                            "{spending_txid}: {e}"
+                        )),
+                    ),
                 });
             }
         };
@@ -301,9 +303,7 @@ where
     if c.chain != seal.chain_id {
         return Ok(CommitmentScan::WrongChain);
     }
-    if c.seal_txid != *seal.outpoint.txid.as_bytes()
-        || c.seal_vout != seal.outpoint.vout
-    {
+    if c.seal_txid != *seal.outpoint.txid.as_bytes() || c.seal_vout != seal.outpoint.vout {
         return Ok(CommitmentScan::WrongSeal);
     }
     Ok(CommitmentScan::Found)
@@ -331,9 +331,11 @@ pub fn verify_p2mr_output(out: &BtqTxOut, seal: &BtqP2mrSeal) -> Result<(), Seal
     if spk[0] != 0x52 || spk[1] != 0x20 {
         return Err(SealError::from(ChainConfusion::NonP2mrBtqOutput));
     }
-    let root: [u8; 32] = spk[2..34]
-        .try_into()
-        .map_err(|_| SealError::Malformed(rgb_pq_core::MalformedSealError::BadP2mrOutput("root slice".into())))?;
+    let root: [u8; 32] = spk[2..34].try_into().map_err(|_| {
+        SealError::Malformed(rgb_pq_core::MalformedSealError::BadP2mrOutput(
+            "root slice".into(),
+        ))
+    })?;
     if root != seal.p2mr_root {
         return Err(SealError::WrongP2mrRoot {
             expected: hex::encode(seal.p2mr_root),
@@ -363,14 +365,11 @@ pub fn spends_outpoint(_spending_tx: &BtqTx, _seal: &BtqP2mrSeal) -> bool {
 }
 
 /// Verify that a set of decoded inputs includes the seal's outpoint.
-pub fn spends_outpoint_decoded(
-    seal: &BtqP2mrSeal,
-    inputs: &[bitcoin::OutPoint],
-) -> bool {
+pub fn spends_outpoint_decoded(seal: &BtqP2mrSeal, inputs: &[bitcoin::OutPoint]) -> bool {
     let Some(target) = seal.outpoint.to_bitcoin() else {
         return false;
     };
-    inputs.iter().any(|i| *i == target)
+    inputs.contains(&target)
 }
 
 #[cfg(test)]
@@ -404,7 +403,10 @@ mod tests {
             self.chain
         }
         fn current_tip(&self) -> RgbPqResult<ChainTip> {
-            Ok(ChainTip { height: 200, hash: "deadbeef".into() })
+            Ok(ChainTip {
+                height: 200,
+                hash: "deadbeef".into(),
+            })
         }
         fn get_tx(&self, _txid: &str) -> RgbPqResult<Option<BtqTx>> {
             Ok(self.spend.clone())
@@ -530,7 +532,7 @@ mod tests {
     fn build_opret(payload: &[u8]) -> Vec<u8> {
         use bitcoin::script::PushBytesBuf;
         let mut buf = PushBytesBuf::new();
-        buf.extend_from_slice(payload);
+        let _ = buf.extend_from_slice(payload);
         bitcoin::script::Builder::new()
             .push_opcode(bitcoin::opcodes::all::OP_RETURN)
             .push_slice(buf)

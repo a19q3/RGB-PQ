@@ -3,8 +3,6 @@
 //! Security-sensitive failures are never stringly typed. Each variant names the
 //! exact invariant that was violated so callers (and tests) can match on it.
 
-use core::fmt;
-
 /// Top-level RGB-PQ error. Aggregates every subsystem's typed error.
 #[derive(Debug, thiserror::Error)]
 pub enum RgbPqError {
@@ -383,7 +381,7 @@ pub enum UnknownSealStateReason {
 }
 
 /// A seal-state resolution failure surfaced as an error (vs. the informational
-/// [`crate::SealState`] enum used by the resolver).
+/// `SealState` enum used by the resolver in `rgb-pq-resolver`).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SealStateError {
     /// A chain/backend failure.
@@ -443,8 +441,8 @@ impl From<InvalidSealCloseReason> for RgbPqError {
 
 #[cfg(test)]
 mod tests {
-    use crate::RgbPqResult;
     use super::*;
+    use crate::RgbPqResult;
 
     #[test]
     fn errors_are_not_stringly_typed() {
@@ -459,23 +457,25 @@ mod tests {
         let _ = ChainConfusion::OrdinaryRgbSeal;
     }
 
+    fn rgb_error_to_rgbpq(e: RpcError) -> RgbPqError {
+        RgbPqError::from(e)
+    }
+    fn chain_rpc(e: RpcError) -> RgbPqError {
+        RgbPqError::from(SealStateError::from(ResolveError::from(e)))
+    }
+
     #[test]
     fn from_chaining_compiles() {
         // RpcError -> RgbPqError via the direct From<RpcError> impl.
-        let r: RgbPqResult<()> =
-            Err(RpcError::Timeout(5, "x".into())).map_err(RgbPqError::from);
+        let r: RgbPqResult<()> = Err(rgb_error_to_rgbpq(RpcError::Timeout(5, "x".into())));
         // RpcError -> ResolveError -> SealStateError -> RgbPqError chain still works.
-        let r2: RgbPqResult<()> =
-            Err(RpcError::Timeout(5, "x".into()))
-                .map_err(ResolveError::from)
-                .map_err(SealStateError::from)
-                .map_err(RgbPqError::from);
+        let r2: RgbPqResult<()> = Err(chain_rpc(RpcError::Timeout(5, "x".into())));
         assert!(matches!(r, Err(RgbPqError::Rpc(RpcError::Timeout(5, _)))));
         assert!(matches!(
             r2,
-            Err(RgbPqError::SealState(SealStateError::Resolve(ResolveError::Rpc(
-                RpcError::Timeout(5, _)
-            ))))
+            Err(RgbPqError::SealState(SealStateError::Resolve(
+                ResolveError::Rpc(RpcError::Timeout(5, _))
+            )))
         ));
     }
 }

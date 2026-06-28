@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 description = "RGB-PQ canonical BTQ P2MR single-use seal type"
 
 [dependencies]
@@ -22,6 +26,9 @@ proptest = { workspace = true }
 [features]
 default = []
 serde = ["dep:serde"]
+# Enable Dilithium5 (FIPS 204, pk 2592 B, sig 4627 B). Without this, a seal
+# carrying Dilithium5 is rejected at parse time (OwnerAlgoError::FeatureGated).
+dilithium5 = []
 
 [lints]
 workspace = true

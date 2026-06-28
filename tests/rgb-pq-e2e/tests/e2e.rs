@@ -21,6 +21,9 @@ fn local_e2e_flow() {
             ("offline", steps)
         }
     };
-    assert!(steps >= 5, "expected at least 5 verified steps, got {steps}");
+    assert!(
+        steps >= 5,
+        "expected at least 5 verified steps, got {steps}"
+    );
     print_summary(mode, steps);
 }

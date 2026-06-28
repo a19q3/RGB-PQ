@@ -74,10 +74,12 @@ impl BtqChainBackend for BtqRpcClient {
         // possible without an indexer. For the local e2e path the indexer
         // (Component 5) tracks this; the RPC backend surfaces
         // UnsupportedFeature so callers use the indexer instead.
-        Err(ResolveError::Feature(rgb_pq_core::BtqFeature::RpcMethodUnsupported(
-            "get_spending_tx (use the indexer)".into(),
-        ))
-        .into())
+        Err(
+            ResolveError::Feature(rgb_pq_core::BtqFeature::RpcMethodUnsupported(
+                "get_spending_tx (use the indexer)".into(),
+            ))
+            .into(),
+        )
     }
 
     fn prove_tx_inclusion(&self, txid: &str) -> RgbPqResult<BtqInclusionProof> {

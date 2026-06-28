@@ -17,7 +17,7 @@ use core::str::FromStr;
 
 use sha2::{Digest, Sha256};
 
-use rgb_pq_core::{Domain, MalformedSealError, RgbPqResult, SealError};
+use rgb_pq_core::{Domain, MalformedSealError, RgbPqResult};
 
 use crate::types::{
     BtqChainId, BtqOutpoint, CommitmentLocator, ConfirmationPolicy, PqSigAlgo, SealVersion,
@@ -184,10 +184,7 @@ impl BtqP2mrSeal {
         let (commitment_locator, used) = CommitmentLocator::decode(&b[pos..pos + loc_len])?;
         pos += used;
         if used != loc_len {
-            return Err(MalformedSealError::BadEncoding(
-                "locator length mismatch".into(),
-            )
-            .into());
+            return Err(MalformedSealError::BadEncoding("locator length mismatch".into()).into());
         }
         // policy
         need(b, pos, 1)?;
@@ -197,10 +194,7 @@ impl BtqP2mrSeal {
         let (confirmation_policy, used) = ConfirmationPolicy::decode(&b[pos..pos + pol_len])?;
         pos += used;
         if used != pol_len {
-            return Err(MalformedSealError::BadEncoding(
-                "policy length mismatch".into(),
-            )
-            .into());
+            return Err(MalformedSealError::BadEncoding("policy length mismatch".into()).into());
         }
         let _ = pos; // consumed exactly
         Ok(BtqP2mrSeal {
@@ -245,7 +239,8 @@ impl BtqP2mrSeal {
     /// domain-separated via the HRP.
     pub fn to_text(&self) -> String {
         let body = self.body_bytes();
-        let hrp = bech32::Hrp::parse(SEAL_HRP).unwrap_or_else(|_| bech32::Hrp::parse("rgbpqseal").unwrap());
+        let hrp = bech32::Hrp::parse(SEAL_HRP)
+            .unwrap_or_else(|_| bech32::Hrp::parse("rgbpqseal").unwrap());
         bech32::encode::<bech32::Bech32m>(hrp, &body).unwrap_or_default()
     }
 
@@ -254,7 +249,9 @@ impl BtqP2mrSeal {
         let (hrp, data) = bech32::decode(s)
             .map_err(|e| MalformedSealError::BadText(format!("bech32 decode: {e:?}")))?;
         if hrp.to_lowercase() != SEAL_HRP {
-            return Err(MalformedSealError::BadText(format!("wrong HRP '{}'", hrp.to_lowercase())).into());
+            return Err(
+                MalformedSealError::BadText(format!("wrong HRP '{}'", hrp.to_lowercase())).into(),
+            );
         }
         if data.is_empty() {
             return Err(MalformedSealError::BadText("empty payload".into()).into());
@@ -296,7 +293,7 @@ fn need(b: &[u8], pos: usize, n: usize) -> RgbPqResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{BtqTxid};
+    use crate::types::BtqTxid;
 
     fn sample_seal() -> BtqP2mrSeal {
         BtqP2mrSeal::new(
@@ -388,10 +385,7 @@ mod tests {
         // build it directly to avoid the from_byte gate.
         let mut other = sample_seal();
         other.owner_algo = PqSigAlgo::Dilithium5;
-        assert_ne!(
-            sample_seal().canonical_digest(),
-            other.canonical_digest()
-        );
+        assert_ne!(sample_seal().canonical_digest(), other.canonical_digest());
     }
     #[test]
     fn digest_changes_when_chain_id_changes() {

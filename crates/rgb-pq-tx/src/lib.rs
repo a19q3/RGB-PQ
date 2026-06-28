@@ -89,7 +89,9 @@ impl<'a> BtqTxOps<'a> {
             .ok_or_else(|| ResolveError::MissingTx("getnewdilithiumaddress: no address".into()))?
             .to_string();
         // The pubkey is exposed via validateaddress on the dilithium address.
-        let va = self.client.call("validateaddress", &[addr.clone().into()])?;
+        let va = self
+            .client
+            .call("validateaddress", &[addr.clone().into()])?;
         let pk = va
             .get("pubkey")
             .and_then(Value::as_str)
@@ -106,10 +108,9 @@ impl<'a> BtqTxOps<'a> {
         label: &str,
     ) -> RgbPqResult<P2mrOutput> {
         let tree = single_leaf_tree(leaf_script_hex);
-        let v = self.client.call(
-            "sendtop2mr",
-            &[tree, amount_btc.into(), label.into()],
-        )?;
+        let v = self
+            .client
+            .call("sendtop2mr", &[tree, amount_btc.into(), label.into()])?;
         let p2mr_id = v
             .get("p2mr_id")
             .and_then(Value::as_str)
@@ -179,18 +180,16 @@ impl<'a> BtqTxOps<'a> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let input_vout = v
-            .get("input_vout")
-            .and_then(Value::as_u64)
-            .unwrap_or(0) as u32;
+        let input_vout = v.get("input_vout").and_then(Value::as_u64).unwrap_or(0) as u32;
         Ok((hex, input_txid, input_vout))
     }
 
     /// Sign a P2MR spend (uses the wallet's Dilithium keys).
     pub fn sign_p2mr_tx(&self, unsigned_hex: &str, p2mr_id: &str) -> RgbPqResult<String> {
-        let v = self
-            .client
-            .call("signp2mrtransaction", &[unsigned_hex.into(), p2mr_id.into()])?;
+        let v = self.client.call(
+            "signp2mrtransaction",
+            &[unsigned_hex.into(), p2mr_id.into()],
+        )?;
         Ok(v.get("hex")
             .and_then(Value::as_str)
             .unwrap_or("")
@@ -203,7 +202,11 @@ impl<'a> BtqTxOps<'a> {
             .client
             .call("generatetoaddress", &[n.into(), address.into()])?;
         Ok(v.as_array()
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 

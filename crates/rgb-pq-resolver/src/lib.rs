@@ -1,9 +1,9 @@
 //! RGB-PQ P2MR seal resolver and `ResolveWitness` bridge (Components 6).
 //!
 //! Two responsibilities:
-//!   * [`resolver::SealResolver`] — resolves a [`BtqP2mrSeal`] to a
-//!     [`resolver::SealState`], verifying the full P2MR / Dilithium /
-//!     commitment / finality chain.
+//!   * [`resolver::SealResolver`] — resolves a `BtqP2mrSeal` (from
+//!     `rgb-pq-seal`) to a [`resolver::SealState`], verifying the full P2MR /
+//!     Dilithium / commitment / finality chain.
 //!   * [`witness::BtqWitnessResolver`] — implements RGB's
 //!     [`rgbcore::validation::ResolveWitness`] over a BTQ backend, so the RGB
 //!     validator can confirm witness transactions on BTQ.
@@ -16,7 +16,7 @@ pub mod resolver;
 pub mod witness;
 
 pub use resolver::{
-    is_pq_owner_algo, spends_outpoint_decoded, verify_commitment_in_outputs,
-    verify_p2mr_output, CommitmentScan, SealResolver, SealState,
+    is_pq_owner_algo, spends_outpoint_decoded, verify_commitment_in_outputs, verify_p2mr_output,
+    CommitmentScan, SealResolver, SealState,
 };
 pub use witness::{BtqWitnessResolver, ChainNetMapping};

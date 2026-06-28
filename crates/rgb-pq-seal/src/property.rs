@@ -11,7 +11,9 @@
 
 use proptest::prelude::*;
 
-use crate::types::{BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo};
+use crate::types::{
+    BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo,
+};
 use crate::BtqP2mrSeal;
 
 fn any_seal() -> impl Strategy<Value = BtqP2mrSeal> {
@@ -26,27 +28,29 @@ fn any_seal() -> impl Strategy<Value = BtqP2mrSeal> {
         any::<u32>(),
     )
         .prop_map(
-            |(chain, txid, vout, root, leaf, locator_kind, policy_kind, n)| BtqP2mrSeal::new(
-                if chain {
-                    BtqChainId::BitcoinQuantumRegtest
-                } else {
-                    BtqChainId::BitcoinQuantumTestnet
-                },
-                BtqOutpoint::new(BtqTxid::from_bytes(txid), vout),
-                root,
-                leaf,
-                PqSigAlgo::Dilithium2,
-                if locator_kind {
-                    CommitmentLocator::OpretFirst
-                } else {
-                    CommitmentLocator::OpretVout(n)
-                },
-                if policy_kind {
-                    ConfirmationPolicy::OneConf
-                } else {
-                    ConfirmationPolicy::Depth(n % 100 + 1)
-                },
-            ),
+            |(chain, txid, vout, root, leaf, locator_kind, policy_kind, n)| {
+                BtqP2mrSeal::new(
+                    if chain {
+                        BtqChainId::BitcoinQuantumRegtest
+                    } else {
+                        BtqChainId::BitcoinQuantumTestnet
+                    },
+                    BtqOutpoint::new(BtqTxid::from_bytes(txid), vout),
+                    root,
+                    leaf,
+                    PqSigAlgo::Dilithium2,
+                    if locator_kind {
+                        CommitmentLocator::OpretFirst
+                    } else {
+                        CommitmentLocator::OpretVout(n)
+                    },
+                    if policy_kind {
+                        ConfirmationPolicy::OneConf
+                    } else {
+                        ConfirmationPolicy::Depth(n % 100 + 1)
+                    },
+                )
+            },
         )
 }
 

@@ -10,17 +10,16 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
-pub mod seal;
-pub mod types;
 #[cfg(test)]
 mod property;
+pub mod seal;
+pub mod types;
 #[cfg(test)]
 mod vectors;
 
 pub use seal::{BtqP2mrSeal, P2mrRoot, ScriptLeafHash, BIN_MAGIC, SEAL_HRP};
 pub use types::{
-    BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo,
-    SealVersion,
+    BtqChainId, BtqOutpoint, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo, SealVersion,
 };
 
 /// The domain-tag bytes embedded in the binary encoding. Mirrors

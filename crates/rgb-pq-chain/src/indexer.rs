@@ -5,7 +5,7 @@
 //!
 //! Two implementations share the [`Indexer`] trait:
 //!   * [`MemIndexer`] — deterministic, in-memory, local-only (clearly marked);
-//!   * [`SqliteIndexer`] — persistent (behind the `sqlite` feature).
+//!   * `SqliteIndexer` — persistent (behind the `sqlite` feature).
 //!
 //! The indexer is a *cache* over the chain backend. It does not make consensus
 //! decisions; the resolver (Component 6) does the final verification.
@@ -15,7 +15,9 @@ use std::collections::BTreeMap;
 use rgb_pq_core::RgbPqResult;
 use rgb_pq_seal::BtqOutpoint;
 
-use crate::backend::{BtqTx, BtqTxOut, ChainTip, TxStatus};
+#[cfg(test)]
+use crate::backend::TxStatus;
+use crate::backend::{BtqTx, BtqTxOut, ChainTip};
 
 /// The set of facts an indexer records about a watched outpoint.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -74,8 +76,8 @@ struct Entry {
 /// A deterministic in-memory indexer.
 ///
 /// **Local-only.** Suitable for tests and the local e2e harness. Marked as
-/// such because it holds no durable state; use [`SqliteIndexer`] for
-/// persistence.
+/// such because it holds no durable state; use `SqliteIndexer` (sqlite feature)
+/// for persistence.
 #[derive(Default)]
 pub struct MemIndexer {
     height: u32,
@@ -173,6 +175,7 @@ impl Indexer for MemIndexer {
 // =========================================================================
 
 #[cfg(feature = "sqlite")]
+/// Persistent (SQLite) indexer implementation.
 pub mod sqlite {
     use super::*;
     use rgb_pq_core::{IndexError, RgbPqResult};
@@ -189,8 +192,8 @@ pub mod sqlite {
     impl SqliteIndexer {
         /// Open (or create) a SQLite indexer at `path`.
         pub fn open(path: &str) -> RgbPqResult<Self> {
-            let conn = Connection::open(path)
-                .map_err(|e| IndexError::Persistence(e.to_string()))?;
+            let conn =
+                Connection::open(path).map_err(|e| IndexError::Persistence(e.to_string()))?;
             conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS outpoints (
                     k TEXT PRIMARY KEY,
@@ -207,7 +210,11 @@ pub mod sqlite {
             )
             .map_err(|e| IndexError::Persistence(e.to_string()))?;
             let (height, tip_hash) = read_meta(&conn)?;
-            Ok(Self { conn, height, tip_hash })
+            Ok(Self {
+                conn,
+                height,
+                tip_hash,
+            })
         }
 
         /// Open an in-memory SQLite indexer (useful for tests).
@@ -218,20 +225,16 @@ pub mod sqlite {
 
     fn read_meta(conn: &Connection) -> RgbPqResult<(u32, String)> {
         let height: u32 = conn
-            .query_row(
-                "SELECT v FROM meta WHERE k='height'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT v FROM meta WHERE k='height'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
         let tip = conn
-            .query_row(
-                "SELECT v FROM meta WHERE k='tip'",
-                [],
-                |r| r.get::<_, String>(0),
-            )
+            .query_row("SELECT v FROM meta WHERE k='tip'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .unwrap_or_default();
         Ok((height, tip))
     }
@@ -252,14 +255,21 @@ pub mod sqlite {
 
     impl Indexer for SqliteIndexer {
         fn tip(&self) -> ChainTip {
-            ChainTip { height: self.height, hash: self.tip_hash.clone() }
+            ChainTip {
+                height: self.height,
+                hash: self.tip_hash.clone(),
+            }
         }
 
         fn watch(&mut self, outpoint: &BtqOutpoint) -> RgbPqResult<()> {
             self.conn
                 .execute(
                     "INSERT OR IGNORE INTO outpoints(k,txid,vout) VALUES (?1,?2,?3)",
-                    rusqlite::params![key(outpoint), outpoint.txid.to_string(), outpoint.vout as i64],
+                    rusqlite::params![
+                        key(outpoint),
+                        outpoint.txid.to_string(),
+                        outpoint.vout as i64
+                    ],
                 )
                 .map_err(|e| IndexError::Persistence(e.to_string()))?;
             Ok(())
@@ -408,7 +418,10 @@ mod tests {
     #[test]
     fn mem_watch_record_get() {
         let mut idx = MemIndexer::new();
-        idx.set_tip(ChainTip { height: 10, hash: "h".into() });
+        idx.set_tip(ChainTip {
+            height: 10,
+            hash: "h".into(),
+        });
         let o = outp(0);
         idx.watch(&o).unwrap();
         idx.record_spend(&o, &tx(1, 3)).unwrap();
@@ -420,7 +433,10 @@ mod tests {
     #[test]
     fn mem_rollback_drops_high_spends() {
         let mut idx = MemIndexer::new();
-        idx.set_tip(ChainTip { height: 10, hash: "h".into() });
+        idx.set_tip(ChainTip {
+            height: 10,
+            hash: "h".into(),
+        });
         let o = outp(0);
         idx.watch(&o).unwrap();
         idx.record_spend(&o, &tx(1, 3)).unwrap();
@@ -433,7 +449,10 @@ mod tests {
     #[test]
     fn mem_rescan_clears_confirmations() {
         let mut idx = MemIndexer::new();
-        idx.set_tip(ChainTip { height: 10, hash: "h".into() });
+        idx.set_tip(ChainTip {
+            height: 10,
+            hash: "h".into(),
+        });
         let o = outp(0);
         idx.watch(&o).unwrap();
         idx.record_spend(&o, &tx(1, 3)).unwrap();
@@ -447,7 +466,10 @@ mod tests {
     #[test]
     fn sqlite_persists_and_reads() {
         let mut idx = sqlite::SqliteIndexer::open_memory().unwrap();
-        idx.set_tip(ChainTip { height: 7, hash: "h7".into() });
+        idx.set_tip(ChainTip {
+            height: 7,
+            hash: "h7".into(),
+        });
         let o = outp(1);
         idx.watch(&o).unwrap();
         idx.record_output(

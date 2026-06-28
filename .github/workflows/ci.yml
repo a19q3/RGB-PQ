@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Fetch vendored upstream repos
+        run: bash scripts/setup-external.sh
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: cargo test (all-features)
+        run: cargo test --workspace --all-features
+
+      - name: cargo test (no-default-features)
+        run: cargo test --workspace --no-default-features
+
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        run: cargo doc --workspace --no-deps
+
+  # The local e2e runs offline by default in CI (no BTQ node). The live path is
+  # exercised locally via scripts/e2e-local.sh.
+  e2e-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch vendored upstream repos
+        run: bash scripts/setup-external.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Run offline e2e
+        run: cargo test -p rgb-pq-e2e -- --nocapture

@@ -15,12 +15,10 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use rgb_pq_core::{
-    ChainConfusion, NodeUnavailable, ResolveError, RgbPqResult, RpcError,
-};
+use rgb_pq_core::{ChainConfusion, NodeUnavailable, ResolveError, RgbPqResult, RpcError};
 use rgb_pq_seal::BtqChainId;
 
-use crate::backend::{node_unavailable, BtqInclusionProof, BtqTx, BtqTxOut, ChainTip, TxStatus};
+use crate::backend::{node_unavailable, BtqInclusionProof, BtqTx, ChainTip, TxStatus};
 use crate::network::BtqRpcConfig;
 
 /// Default per-request timeout.
@@ -41,10 +39,13 @@ impl BtqRpcClient {
     pub fn new(config: BtqRpcConfig) -> Self {
         let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS));
         let retries = config.retries.unwrap_or(DEFAULT_RETRIES);
-        let agent = ureq::AgentBuilder::new()
-            .timeout(timeout)
-            .build();
-        Self { config, timeout, retries, agent }
+        let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+        Self {
+            config,
+            timeout,
+            retries,
+            agent,
+        }
     }
 
     /// The chain this client is configured for.
@@ -57,7 +58,7 @@ impl BtqRpcClient {
         // Strip userinfo if present.
         let url = &self.config.url;
         if let Some(after_scheme) = url.split("://").nth(1) {
-            let host = after_scheme.split('@').last().unwrap_or(after_scheme);
+            let host = after_scheme.split('@').next_back().unwrap_or(after_scheme);
             format!("{}://{host}", url.split("://").next().unwrap_or("http"))
         } else {
             url.clone()
@@ -114,7 +115,7 @@ impl BtqRpcClient {
                     // HTTP error — do not retry (server answered).
                     let detail = resp.into_string().unwrap_or_default();
                     return Err(RpcError::HttpStatus {
-                        status: code as u16,
+                        status: code,
                         endpoint: endpoint_safe,
                         detail,
                     }
@@ -187,10 +188,9 @@ fn basic_auth(user: &str, pass: &str) -> String {
 
 /// Minimal base64 encoder (avoids pulling a base64 crate just for auth).
 mod base64_encode {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     pub fn encode(bytes: &[u8]) -> String {
-        let mut out = String::with_capacity((bytes.len() + 2) / 3 * 4);
+        let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
         for chunk in bytes.chunks(3) {
             let b = [
                 chunk[0],
@@ -240,12 +240,23 @@ impl BtqRpcClient {
         let res = self.call("getrawtransaction", &[txid.into(), true.into()]);
         match res {
             Ok(v) => {
-                let hex = v.get("hex").and_then(Value::as_str).unwrap_or("").to_string();
+                let hex = v
+                    .get("hex")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 let raw = hex::decode(&hex).unwrap_or_default();
                 let status = tx_status_from_verbose(&v);
-                Ok(Some(BtqTx { txid: txid.to_string(), raw, status }))
+                Ok(Some(BtqTx {
+                    txid: txid.to_string(),
+                    raw,
+                    status,
+                }))
             }
-            Err(rgb_pq_core::RgbPqError::Resolve(ResolveError::Rpc(RpcError::RpcLevel { code: -5, .. }))) => {
+            Err(rgb_pq_core::RgbPqError::Resolve(ResolveError::Rpc(RpcError::RpcLevel {
+                code: -5,
+                ..
+            }))) => {
                 // -5 = "No such mempool or blockchain transaction"
                 Ok(None)
             }
@@ -266,7 +277,11 @@ impl BtqRpcClient {
             TxStatus::Confirmed { block_hash, .. } => block_hash,
             _ => String::new(),
         };
-        Ok(BtqInclusionProof { txid: txid.to_string(), block_hash, proof_hex: proof })
+        Ok(BtqInclusionProof {
+            txid: txid.to_string(),
+            block_hash,
+            proof_hex: proof,
+        })
     }
 
     /// `getrawtransaction` verbose status only -> [`TxStatus`].
@@ -297,10 +312,7 @@ fn tx_status_from_verbose(v: &Value) -> TxStatus {
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string();
-    let block_height = v
-        .get("blockheight")
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as u32;
+    let block_height = v.get("blockheight").and_then(Value::as_u64).unwrap_or(0) as u32;
     let time = v.get("blocktime").and_then(Value::as_i64).unwrap_or(0);
     TxStatus::Confirmed {
         height: block_height,
