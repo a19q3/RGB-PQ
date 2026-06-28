@@ -255,6 +255,165 @@ pub fn run_live_flow(client: &mut BtqRpcClient) -> usize {
     steps
 }
 
+/// Run the live **P2MR-ret** flow: build a 2-leaf P2MR tree (PQ spend leaf +
+/// RGB commitment leaf), fund it, confirm the node-accepted root equals the
+/// Rust-computed root, spend via the PQ leaf, and verify the commitment leaf is
+/// bound into the root. Returns the count of verified steps.
+pub fn run_live_p2mr_ret_flow(client: &mut BtqRpcClient) -> usize {
+    use rgb_pq_commit::{
+        build_p2mr_ret_tree_for_seal, commitment_leaf_script, tree_json, verify_p2mr_ret,
+        P2MR_COMMITMENT_LEAF_VERSION,
+    };
+    use rgb_pq_tx::BtqTxOps;
+
+    let mut steps = 0;
+
+    // Fresh wallet for this run.
+    let suffix = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| (d.subsec_nanos() % 1_000_000) as u64)
+            .unwrap_or(0)
+    };
+    let wallet = format!("rgbpq-ret-{suffix}");
+    client.set_wallet(None);
+    let _ = client.call("createwallet", &[wallet.clone().into()]);
+    client.set_wallet(Some(wallet.as_str()));
+
+    let _ = client.call("settxfee", &[0.001f64.into()]);
+    let miner = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let ops = BtqTxOps::new(client);
+    ops.generate(110, &miner).expect("mine 110 to fund wallet");
+
+    // Build a P2MR-ret tree in Rust: PQ leaf = OP_TRUE, commitment leaf carries
+    // the RGB-PQ commitment. The seal's p2mr_root will be set to the tree root.
+    let pq_leaf_hex = "51"; // OP_TRUE
+    let pq_leaf = hex::decode(pq_leaf_hex).unwrap();
+    let mpc: rgb_pq_commit::MpcCommitment = [0xb9; 32];
+    // The commitment leaf depends only on (chain, mpc), not the outpoint, so we
+    // can build it before funding (the outpoint binding is implicit: the leaf
+    // lives in the very P2MR output the seal will name).
+    let comm_script = commitment_leaf_script(client.chain(), mpc);
+    let comm_script_hex = hex::encode(&comm_script);
+    let tree = build_p2mr_ret_tree_for_seal(client.chain(), mpc, &pq_leaf);
+    let rust_root_hex = hex::encode(tree.root);
+
+    // Build the same tree JSON and have the node accept it; confirm the root
+    // matches our Rust-computed root.
+    let tj = tree_json(pq_leaf_hex, &comm_script_hex);
+    let created = client
+        .call("getnewp2mraddress", &[tj])
+        .expect("getnewp2mraddress");
+    let node_root = created
+        .get("merkle_root")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    assert_eq!(
+        node_root, rust_root_hex,
+        "P2MR-ret: node root must equal Rust-computed root"
+    );
+    steps += 1;
+    println!("[e2e-ret] node root matches Rust root: {node_root}");
+
+    // Fund the P2MR-ret output using the 2-leaf tree (NOT a single-leaf tree),
+    // so the on-chain root is the P2MR-ret root that binds the commitment leaf.
+    let p2mr_id = created
+        .get("p2mr_id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    // sendtop2mr reuses the same p2mr_id for the same tree; it funds the
+    // 2-leaf P2MR-ret output we built above.
+    let tj2 = tree_json(pq_leaf_hex, &comm_script_hex);
+    let funded = client
+        .call("sendtop2mr", &[tj2, 0.5f64.into(), "rgbpq-ret-seal".into()])
+        .expect("sendtop2mr p2mr-ret");
+    let fund_txid = funded
+        .get("txid")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let funded_out = rgb_pq_tx::P2mrOutput {
+        p2mr_id: p2mr_id.clone(),
+        address: created
+            .get("address")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        script_pubkey_hex: created
+            .get("scriptPubKey")
+            .and_then(Value::as_str)
+            .unwrap_or(node_root)
+            .to_string(),
+        merkle_root_hex: node_root.to_string(),
+        funding_txid: fund_txid,
+    };
+    let _ = ops.generate(1, &miner);
+    wait_for_p2mr_spendable(client, &funded_out, &miner);
+    steps += 1;
+    println!("[e2e-ret] funded P2MR-ret id={p2mr_id}");
+
+    // Build the real seal with the funding outpoint + the P2MR-ret root.
+    let fund_vout = find_p2mr_vout(client, &funded_out).unwrap_or(0);
+    let mut root_arr = [0u8; 32];
+    let root_bytes = hex::decode(&funded_out.merkle_root_hex).unwrap_or_default();
+    if root_bytes.len() == 32 {
+        root_arr.copy_from_slice(&root_bytes);
+    }
+    let seal = BtqP2mrSeal::new(
+        client.chain(),
+        BtqOutpoint::new(
+            funded_out.funding_txid.parse::<BtqTxid>().expect("txid"),
+            fund_vout,
+        ),
+        root_arr,
+        rgb_pq_tx::compute_tapleaf_hash(&pq_leaf),
+        PqSigAlgo::Dilithium2,
+        CommitmentLocator::P2mrRetLeaf,
+        ConfirmationPolicy::OneConf,
+    );
+
+    // Verify the commitment leaf is bound to the seal's root (P2MR-ret verify).
+    verify_p2mr_ret(&seal, mpc, &pq_leaf).expect("p2mr-ret verify");
+    steps += 1;
+    println!("[e2e-ret] verified commitment leaf bound to P2MR root");
+
+    // Spend via the PQ leaf (OP_TRUE), confirming the tree is spendable.
+    let dest = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let (unsigned, _, _) = ops
+        .create_p2mr_spend(&p2mr_id, &dest, 0.2, 0.0001)
+        .expect("create p2mr-ret spend");
+    let signed = ops
+        .sign_p2mr_tx(&unsigned, &p2mr_id)
+        .expect("sign p2mr-ret");
+    let close_txid = ops.broadcast(&signed).expect("broadcast p2mr-ret");
+    let _ = ops.generate(1, &miner);
+    steps += 1;
+    println!("[e2e-ret] closed P2MR-ret seal in tx {close_txid}");
+
+    // Confirmations.
+    let confs = client
+        .call("gettransaction", &[close_txid.clone().into(), true.into()])
+        .ok()
+        .and_then(|v| v.get("confirmations").and_then(Value::as_u64))
+        .unwrap_or(0);
+    assert!(confs >= 1, "p2mr-ret close not confirmed");
+    steps += 1;
+    println!("[e2e-ret] close confirmed ({confs} confs)");
+
+    let _ = P2MR_COMMITMENT_LEAF_VERSION;
+    steps
+}
+
 /// Wait until the funded P2MR output is confirmed and the wallet sees it as a
 /// spendable UTXO. Mines an extra block per attempt to defeat any indexing
 /// race. Deterministic on regtest.

@@ -226,8 +226,14 @@ impl fmt::Display for PqSigAlgo {
 // Commitment locator
 // =========================================================================
 
-/// Where, within the closing transaction, the RGB transition commitment
-/// (OP_RETURN) is located.
+/// Where the RGB transition commitment is located for a seal.
+///
+/// Two schemes are supported:
+///   * **opret** — the commitment is in an OP_RETURN output of the closing tx
+///     (the simpler, visible scheme; Phase 1).
+///   * **p2mr-ret** — the commitment is a dedicated leaf in the P2MR script
+///     tree, bound directly into the P2MR root (the tapret-equivalent for
+///     P2MR; Phase 2). No separate OP_RETURN output.
 ///
 /// The locator is part of the canonical seal encoding so the resolver can find
 /// the commitment unambiguously and reject duplicate / conflicting commitments.
@@ -239,19 +245,30 @@ pub enum CommitmentLocator {
     /// The commitment is in the *first* OP_RETURN output of the tx (the
     /// default RGB opret convention).
     OpretFirst,
+    /// The commitment is a dedicated leaf in the P2MR script tree (P2MR-ret).
+    /// No OP_RETURN output; the commitment is bound into the seal's
+    /// `p2mr_root`.
+    P2mrRetLeaf,
 }
 
 impl CommitmentLocator {
     /// Tag byte used in the binary encoding.
     const TAG_OPRET_VOUT: u8 = 0x01;
     const TAG_OPRET_FIRST: u8 = 0x02;
+    const TAG_P2MR_RET_LEAF: u8 = 0x03;
 
-    /// Resolve to a concrete vout if possible.
+    /// Resolve to a concrete vout if possible (only meaningful for opret).
     pub fn resolve_vout(self, opret_vouts: &[u32]) -> Option<u32> {
         match self {
             CommitmentLocator::OpretVout(v) => Some(v),
             CommitmentLocator::OpretFirst => opret_vouts.first().copied(),
+            CommitmentLocator::P2mrRetLeaf => None,
         }
+    }
+
+    /// Whether this locator is the P2MR-ret scheme (commitment in the tree).
+    pub fn is_p2mr_ret(self) -> bool {
+        matches!(self, CommitmentLocator::P2mrRetLeaf)
     }
 
     /// Encode to a byte vector.
@@ -264,6 +281,7 @@ impl CommitmentLocator {
                 out
             }
             CommitmentLocator::OpretFirst => vec![Self::TAG_OPRET_FIRST],
+            CommitmentLocator::P2mrRetLeaf => vec![Self::TAG_P2MR_RET_LEAF],
         }
     }
 
@@ -274,6 +292,7 @@ impl CommitmentLocator {
         };
         match tag {
             Self::TAG_OPRET_FIRST => Ok((CommitmentLocator::OpretFirst, 1)),
+            Self::TAG_P2MR_RET_LEAF => Ok((CommitmentLocator::P2mrRetLeaf, 1)),
             Self::TAG_OPRET_VOUT => {
                 if bytes.len() < 1 + 4 {
                     return Err(MalformedSealError::BadLength {
@@ -563,12 +582,20 @@ mod tests {
             CommitmentLocator::OpretVout(0),
             CommitmentLocator::OpretVout(7),
             CommitmentLocator::OpretVout(u32::MAX),
+            CommitmentLocator::P2mrRetLeaf,
         ] {
             let enc = loc.encode();
             let (dec, n) = CommitmentLocator::decode(&enc).unwrap();
             assert_eq!(dec, loc);
             assert_eq!(n, enc.len());
         }
+    }
+
+    #[test]
+    fn p2mr_ret_locator_is_p2mr_ret() {
+        assert!(CommitmentLocator::P2mrRetLeaf.is_p2mr_ret());
+        assert!(!CommitmentLocator::OpretFirst.is_p2mr_ret());
+        assert!(CommitmentLocator::P2mrRetLeaf.resolve_vout(&[]).is_none());
     }
 
     #[test]

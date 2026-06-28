@@ -25,9 +25,15 @@
 
 pub mod anchor;
 pub mod commitment;
+pub mod p2mrret;
 
 pub use anchor::{embed_opret_commitment, verify_opret_anchor, OpretAnchorError};
 pub use commitment::{
     strip_op_return, CommitmentPayload, MpcCommitment, RgbPqCommitment, COMMITMENT_MAGIC,
     COMMITMENT_PROTOCOL_TAG,
+};
+pub use p2mrret::{
+    build_p2mr_ret_tree, build_p2mr_ret_tree_for_seal, commitment_leaf_script,
+    compute_tapbranch_hash, compute_tapleaf_hash, find_commitment_in_tree, tree_json,
+    verify_p2mr_ret, NodeHash, P2mrRetProof, P2mrRetTree, PlacedLeaf, P2MR_COMMITMENT_LEAF_VERSION,
 };

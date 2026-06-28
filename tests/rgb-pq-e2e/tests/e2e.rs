@@ -42,3 +42,20 @@ fn live_close_with_opret_commitment() {
     assert!(steps >= 6, "expected >=6 live steps, got {steps}");
     println!("[e2e-live] full live close verified ({steps} steps)");
 }
+
+/// Dedicated **P2MR-ret** live test. Skips cleanly when no node is reachable.
+/// When a node is present it builds a 2-leaf P2MR tree (PQ leaf + RGB
+/// commitment leaf), confirms the node-accepted root equals the Rust-computed
+/// root, funds it, spends via the PQ leaf, and verifies the commitment leaf is
+/// bound into the root.
+#[test]
+fn live_p2mr_ret_commitment() {
+    let cfg = read_live_config();
+    let Some(mut client) = try_connect(&cfg) else {
+        eprintln!("[e2e-ret] skipping P2MR-ret test (no BTQ node)");
+        return;
+    };
+    let steps = run_live_p2mr_ret_flow(&mut client);
+    assert!(steps >= 5, "expected >=5 p2mr-ret steps, got {steps}");
+    println!("[e2e-ret] P2MR-ret commitment verified ({steps} steps)");
+}
