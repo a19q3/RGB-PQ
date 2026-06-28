@@ -245,12 +245,19 @@ impl<'a, B: BtqChainBackend> SealResolver<'a, B> {
 // =========================================================================
 
 /// Result of scanning a spending tx for the RGB-PQ commitment bound to `seal`.
-enum CommitmentScan {
+#[derive(Debug, PartialEq, Eq)]
+pub enum CommitmentScan {
+    /// A valid, correctly-bound commitment was found.
     Found,
+    /// No commitment was found.
     Missing,
+    /// Multiple commitments were found (ambiguous).
     Duplicate,
+    /// A commitment was found but malformed.
     Malformed(String),
+    /// A commitment was found but bound to the wrong chain.
     WrongChain,
+    /// A commitment was found but bound to the wrong seal.
     WrongSeal,
 }
 
