@@ -323,13 +323,34 @@ documented test that the digest *changes* when it changes.
 |---|---|---|
 | RGB issuance / transition / consignment / validation | **Real** | via vendored `rgbcore`+`rgbstd` `Stock`/`ContractBuilder`/`Validator` |
 | RGB `ResolveWitness` against BTQ | **Real** | BTQ RPC `getrawtransaction`+`getblockheader` |
-| BTQ P2MR output creation / spend | **Real** | `btq-core` RPC; Dilithium leaf (not `OP_TRUE`) for the PQ path |
-| BTQ Dilithium script-path signing | **Real** | `createp2mrspend`+`signp2mrtransaction` in the node |
-| RGB MPC commitment embedding | **Real** | `rgbcore::dbc::opret` `EmbedCommitVerify` |
-| Inclusion proof | **Real** | `gettxoutproof`/`verifytxoutproof` |
+| BTQ P2MR output creation / spend | **Real, live-verified** | `btq-core` RPC; OP_RETURN commitment insertion into the unsigned spend, then `signp2mrtransaction` |
+| BTQ Dilithium script-path signing | **Real** | `signp2mrtransaction` in the node (PQ path is btq-core's own `feature_p2mr.py`) |
+| RGB MPC commitment embedding | **Real, live-verified** | OP_RETURN payload `RGBPQCM…` confirmed on a mined regtest block |
+| Inclusion proof | **Real, live-verified** | `gettxoutproof` + `verifytxoutproof` round-trips the close tx |
 | `btqd` regtest lifecycle | **Real** | started/stopped by `scripts/e2e-local.sh` |
 | Persistent indexer storage | **SQLite (real)** + **in-memory (local-only, tested)** | persistent path optional via feature |
-| `btq-core` build | **External** | C/C++ autotools; the script builds it if `btqd` is absent |
+| `btq-core` build | **External** | C/C++ autotools; `scripts/build-btq.sh` builds it if `btqd` is absent |
+
+### Live close ordering (verified)
+
+The closing-transaction construction is the load-bearing detail. It is:
+
+```text
+1. sendtop2mr <tree> <amount>                     -> funding txid, p2mr_id
+2. generatetoaddress 1 <miner>                     -> confirm funding
+3. createp2mrspend <p2mr_id> <dest> <amt> <fee>    -> unsigned raw hex
+4. append_opret_commitment(unsigned_hex, seal, mpc) -> modified hex (+OP_RETURN output)
+5. signp2mrtransaction <modified_hex> <p2mr_id>    -> signed hex (P2MR/Dilithium witness)
+6. sendrawtransaction <signed_hex>                 -> close txid
+7. generatetoaddress 1 <miner>                     -> confirm close
+```
+
+Step 4 is the RGB-PQ insertion: it decodes the unsigned raw tx, appends an
+`OP_RETURN` output carrying `RgbPqCommitment`, and re-encodes — all via the real
+`bitcoin` consensus codec, so the result is byte-identical to a hand-built tx.
+The node requires `-datacarriersize=256` (the payload is 127 B > the 83 B
+default) and `-fallbackfee` (before fee estimation has data); both are set by
+`scripts/e2e-local.sh`.
 
 **Nothing in the security-critical path is mocked.** The only "local-only"
 pieces are (a) the in-memory indexer variant (clearly marked, deterministic,

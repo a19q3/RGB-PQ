@@ -18,6 +18,10 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 
+pub mod commit;
+
+pub use commit::{append_opret_commitment, build_op_return_script, find_commitment_in_signed_tx};
+
 use serde_json::{json, Value};
 
 use rgb_pq_chain::{BtqChainBackend, BtqRpcClient};
@@ -116,33 +120,41 @@ impl<'a> BtqTxOps<'a> {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let merkle_root_hex = v
-            .get("merkle_root")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let script_pubkey_hex = v
-            .get("scriptPubKey")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        // `sendtop2mr` returns only {txid, address, p2mr_id}; the merkle_root
+        // and scriptPubKey are fetched from getp2mrinfo.
         let funding_txid = v
             .get("txid")
             .and_then(Value::as_str)
             .or_else(|| v.get("tx").and_then(Value::as_str))
             .unwrap_or("")
             .to_string();
-        // address via getp2mrinfo if present
         let info = self
             .client
             .call("getp2mrinfo", &[p2mr_id.clone().into()])
             .ok();
-        let address = info
-            .as_ref()
-            .and_then(|i| i.get("address"))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let pick = |field: &str| -> String {
+            v.get(field)
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    info.as_ref()
+                        .and_then(|i| i.get(field))
+                        .and_then(Value::as_str)
+                })
+                .unwrap_or("")
+                .to_string()
+        };
+        let address = pick("address");
+        let merkle_root_hex = pick("merkle_root");
+        let script_pubkey_hex = pick("scriptPubKey");
+        // fall back to the address from sendtop2mr if getp2mrinfo omitted it
+        let address = if address.is_empty() {
+            v.get("address")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        } else {
+            address
+        };
         Ok(P2mrOutput {
             p2mr_id,
             address,

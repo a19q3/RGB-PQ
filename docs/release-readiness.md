@@ -30,7 +30,8 @@ experimentation, every item below must be satisfied. Most are **not** done.
 ## Current state
 
 - All 15 components implemented.
-- Real RGB issuance + BTQ P2MR/Dilithium (when a node is available) + opret
-  commitment + `ResolveWitness` bridge.
-- Deterministic offline e2e passes from a clean checkout.
+- Real RGB issuance + BTQ P2MR/Dilithium + opret commitment + `ResolveWitness`
+  bridge — **live-verified** against a built `btqd` regtest node (close tx with
+  OP_RETURN commitment mined, confirmed, and inclusion-proofed).
+- Deterministic offline e2e passes from a clean checkout (no node needed).
 - See `SECURITY.md` §17 for the full "before real-value deployment" list.

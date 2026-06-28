@@ -31,6 +31,9 @@ pub struct BtqRpcConfig {
     pub timeout_secs: Option<u64>,
     /// Transient-error retry count.
     pub retries: Option<u32>,
+    /// Optional wallet name. When set, wallet-scoped RPCs are routed through
+    /// `<url>/wallet/<name>` (Bitcoin Core convention).
+    pub wallet: Option<String>,
 }
 
 impl BtqRpcConfig {
@@ -45,6 +48,7 @@ impl BtqRpcConfig {
             },
             timeout_secs: None,
             retries: None,
+            wallet: None,
         }
     }
 
@@ -59,6 +63,7 @@ impl BtqRpcConfig {
             },
             timeout_secs: None,
             retries: None,
+            wallet: None,
         }
     }
 }

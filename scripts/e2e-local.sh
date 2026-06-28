@@ -64,11 +64,16 @@ run_live() {
     # 3. start regtest node
     log "starting btqd regtest on port $RPC_PORT"
     mkdir -p "$DATADIR"
+    # Node flags:
+    #   -txindex=1            : index all txs so getrawtransaction/gettxoutproof work without a blockhash
+    #   -datacarriersize=256  : allow the RGB-PQ OP_RETURN commitment (127 bytes > the 83-byte default)
+    #   -fallbackfee=0.0001   : fee estimation before enough blocks exist
     "$BTQD" -regtest \
         -datadir="$DATADIR" \
         -rpcport="$RPC_PORT" -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" \
         -rpcallowip=127.0.0.1 \
         -listen=0 -dnsseed=0 -upnp=0 -natpmp=0 \
+        -txindex=1 -datacarriersize=256 -fallbackfee=0.0001 \
         -printtoconsole -daemonwait=true >>"$LOG" 2>&1 &
     BTQD_PID=$!
 
@@ -83,23 +88,15 @@ run_live() {
     done
     [ "$ready" = 1 ] || { log "btqd RPC not ready"; return 1; }
 
-    # 5. wallet + initial blocks
-    log "creating wallet '$WALLET'"
-    "$BTQCLI" -regtest -rpcport="$RPC_PORT" -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" \
-        -rpcwallet="$WALLET" createwallet "$WALLET" >/dev/null 2>&1 || true
-    MINER=$("$BTQCLI" -regtest -rpcport="$RPC_PORT" -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" \
-        -rpcwallet="$WALLET" getnewaddress)
-    log "mining 110 blocks to $MINER"
-    "$BTQCLI" -regtest -rpcport="$RPC_PORT" -rpcuser="$RPC_USER" -rpcpassword="$RPC_PASS" \
-        -rpcwallet="$WALLET" generatetoaddress 110 "$MINER" >/dev/null
-
-    # 6. run the e2e with the node configured
+    # 5. run the e2e with the node configured. The e2e harness itself creates
+    #    its own wallet ('rgbpq-live') and mines the funding blocks it needs, so
+    #    no pre-mining is done here.
     log "running RGB-PQ e2e (live+offline)"
     RGBPQ_BTQ_RPC="http://127.0.0.1:$RPC_PORT" \
     RGBPQ_BTQ_USER="$RPC_USER" \
     RGBPQ_BTQ_PASS="$RPC_PASS" \
     RGBPQ_BTQ_CHAIN="bitcoin-quantum-regtest" \
-        cargo run -p rgb-pq-e2e 2>&1 | tee -a "$LOG"
+        cargo test -p rgb-pq-e2e -- --nocapture --test-threads=1 2>&1 | tee -a "$LOG"
 }
 
 run_offline() {

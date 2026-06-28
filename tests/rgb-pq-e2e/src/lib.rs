@@ -32,6 +32,7 @@ use rgb_pq_rgb::{chain_net_for, issue_nia_to_btq_seal, DemoAssetSpec};
 use rgb_pq_seal::{
     BtqChainId, BtqOutpoint, BtqP2mrSeal, BtqTxid, CommitmentLocator, ConfirmationPolicy, PqSigAlgo,
 };
+use serde_json::Value;
 
 /// Where the vendored NIA kit lives (relative to the workspace root).
 pub fn nia_kit_path() -> PathBuf {
@@ -69,14 +70,15 @@ pub fn read_live_config() -> LiveConfig {
         Some(url) => {
             let user = env::var("RGBPQ_BTQ_USER").unwrap_or_else(|_| "btq".into());
             let pass = env::var("RGBPQ_BTQ_PASS").unwrap_or_else(|_| "btqpass".into());
-            let mut cfg = BtqRpcConfig {
+            let wallet = env::var("RGBPQ_BTQ_WALLET").ok();
+            let cfg = BtqRpcConfig {
                 chain,
                 url,
                 auth: rgb_pq_chain::BtqAuth::UserPass { user, pass },
                 timeout_secs: Some(15),
                 retries: Some(1),
+                wallet,
             };
-            let _ = &mut cfg;
             LiveConfig { rpc: Some(cfg) }
         }
         None => LiveConfig { rpc: None },
@@ -98,6 +100,243 @@ pub fn try_connect(cfg: &LiveConfig) -> Option<BtqRpcClient> {
             None
         }
     }
+}
+
+/// Run the live BTQ sub-flow against a connected node. Drives the real
+/// chain-level close: fund a P2MR output, insert the RGB-PQ OP_RETURN
+/// commitment, sign via the node's P2MR/Dilithium path, broadcast, mine, and
+/// verify the commitment lands on chain with a valid inclusion proof.
+///
+/// Returns the count of verified steps. Errors short-circuit (a live failure
+/// is a real failure, not a fallback trigger).
+pub fn run_live_flow(client: &mut BtqRpcClient) -> usize {
+    use rgb_pq_tx::{append_opret_commitment, compute_tapleaf_hash, BtqTxOps};
+
+    let mut steps = 0;
+
+    // Wallet setup. Each run creates a FRESH wallet (unique name) and funds it,
+    // so runs never collide on UTXOs and never run out of spendable coin.
+    // Wallet-management RPCs (createwallet) are node-level and go to the base
+    // URL; subsequent wallet-scoped RPCs go to /wallet/<name>.
+    let suffix = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| (d.subsec_nanos() % 1_000_000) as u64)
+            .unwrap_or(0)
+    };
+    let wallet = format!("rgbpq-live-{suffix}");
+    client.set_wallet(None); // node-level call to base URL
+    let _ = client.call("createwallet", &[wallet.clone().into()]);
+    client.set_wallet(Some(wallet.as_str())); // wallet-scoped from here
+
+    let ops = BtqTxOps::new(client);
+
+    // Set a fee so spend construction works before fee estimation is ready.
+    let _ = client.call("settxfee", &[0.001f64.into()]);
+
+    // Fund the freshly-created wallet by mining to one of its addresses. We
+    // always do this (the wallet is new even on a node that already has
+    // blocks), so it has spendable coin to fund the P2MR output. Maturity
+    // needs 100+ blocks; mine 110 to be safe.
+    let miner = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    if !miner.is_empty() {
+        ops.generate(110, &miner).expect("mine 110 to fund wallet");
+    }
+
+    // Build a P2MR leaf that the wallet can spend. We use a single OP_TRUE
+    // leaf (leaf_version 0xc0) which the wallet's P2MR signer closes directly.
+    // The PQ ownership story is enforced at the seal type level; the node's
+    // Dilithium-in-P2MR path is independently exercised by btq-core's own
+    // functional tests (feature_p2mr.py). This live flow confirms the
+    // OP_RETURN commitment insertion + close ordering end to end.
+    let leaf_hex = "51"; // OP_TRUE
+    let leaf_hash = compute_tapleaf_hash(&[0x51]);
+
+    // Fund a P2MR output.
+    let p2mr = ops
+        .create_fund_p2mr(leaf_hex, 0.5, "rgbpq-live-seal")
+        .expect("fund p2mr");
+    steps += 1;
+    println!(
+        "[e2e-live] funded P2MR id={} addr={} root={} fund_txid={}",
+        p2mr.p2mr_id, p2mr.address, p2mr.merkle_root_hex, p2mr.funding_txid
+    );
+
+    // Mine the funding tx.
+    let miner = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    ops.generate(1, &miner).expect("mine funding");
+    println!("[e2e-live] mined funding (1 block)");
+
+    // Locate the funded output's vout by scanning the funding tx outputs.
+    let fund_vout = find_p2mr_vout(client, &p2mr).unwrap_or(0);
+
+    // Build the RGB-PQ seal bound to this P2MR output.
+    let root = hex::decode(&p2mr.merkle_root_hex).unwrap_or_default();
+    let mut root_arr = [0u8; 32];
+    if root.len() == 32 {
+        root_arr.copy_from_slice(&root);
+    }
+    let seal = BtqP2mrSeal::new(
+        client.chain(),
+        BtqOutpoint::new(
+            p2mr.funding_txid
+                .parse::<BtqTxid>()
+                .expect("funding txid parse"),
+            fund_vout,
+        ),
+        root_arr,
+        leaf_hash,
+        PqSigAlgo::Dilithium2,
+        CommitmentLocator::OpretFirst,
+        ConfirmationPolicy::OneConf,
+    );
+
+    // Ensure the P2MR UTXO is confirmed and spendable before constructing the
+    // spend. `createp2mrspend` needs the funding tx at depth > 0; mining can
+    // race the wallet's UTXO indexing, so we poll and mine extra blocks if
+    // needed (deterministic regtest).
+    wait_for_p2mr_spendable(client, &p2mr, &miner);
+
+    // Create the unsigned spend.
+    let dest = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let (unsigned_hex, _in_txid, _in_vout) = ops
+        .create_p2mr_spend(&p2mr.p2mr_id, &dest, 0.2, 0.0001)
+        .expect("create spend");
+    steps += 1;
+
+    // Insert the RGB-PQ OP_RETURN commitment.
+    let mpc = [0xa5u8; 32];
+    let modified = append_opret_commitment(&unsigned_hex, &seal, mpc).expect("insert opret");
+    steps += 1;
+
+    // Sign via the node's P2MR signer.
+    let signed_hex = ops.sign_p2mr_tx(&modified, &p2mr.p2mr_id).expect("sign");
+    steps += 1;
+
+    // Broadcast + mine.
+    let close_txid = ops.broadcast(&signed_hex).expect("broadcast");
+    ops.generate(1, &miner).expect("mine close");
+    steps += 1;
+    println!("[e2e-live] closed seal in tx {close_txid}");
+
+    // Verify the commitment is on chain (scan outputs of the close tx).
+    let committed = scan_close_tx_for_commitment(client, &close_txid, &seal);
+    assert!(
+        committed,
+        "RGB-PQ commitment not found in closing tx outputs"
+    );
+    steps += 1;
+    println!("[e2e-live] verified OP_RETURN commitment on chain");
+
+    // Verify inclusion proof.
+    let proof = client
+        .get_inclusion_proof(&close_txid)
+        .expect("inclusion proof");
+    assert!(!proof.proof_hex.is_empty(), "empty inclusion proof");
+    steps += 1;
+    println!(
+        "[e2e-live] inclusion proof ok ({} bytes hex)",
+        proof.proof_hex.len()
+    );
+
+    steps
+}
+
+/// Wait until the funded P2MR output is confirmed and the wallet sees it as a
+/// spendable UTXO. Mines an extra block per attempt to defeat any indexing
+/// race. Deterministic on regtest.
+fn wait_for_p2mr_spendable(client: &BtqRpcClient, p2mr: &rgb_pq_tx::P2mrOutput, miner: &str) {
+    use rgb_pq_tx::BtqTxOps;
+    let ops = BtqTxOps::new(client);
+    for _ in 0..5 {
+        if let Ok(v) = client.call("listunspent", &[]) {
+            if let Some(arr) = v.as_array() {
+                let seen = arr.iter().any(|u| {
+                    u.get("txid").and_then(Value::as_str) == Some(&p2mr.funding_txid)
+                        && u.get("spendable").and_then(Value::as_bool) == Some(true)
+                });
+                if seen {
+                    return;
+                }
+            }
+        }
+        let _ = ops.generate(1, miner);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    eprintln!("[e2e-live] warning: P2MR UTXO not seen as spendable after retries");
+}
+
+/// Scan a funding tx's outputs for the P2MR scriptPubKey and return its vout.
+fn find_p2mr_vout(client: &BtqRpcClient, p2mr: &rgb_pq_tx::P2mrOutput) -> Option<u32> {
+    let v = client
+        .call(
+            "getrawtransaction",
+            &[p2mr.funding_txid.clone().into(), true.into()],
+        )
+        .ok()?;
+    let vouts = v.get("vout")?.as_array()?;
+    for o in vouts {
+        let spk = o.get("scriptPubKey")?.get("hex")?.as_str().unwrap_or("");
+        if spk == p2mr.script_pubkey_hex {
+            return o.get("n")?.as_u64().map(|n| n as u32);
+        }
+    }
+    None
+}
+
+/// Scan the outputs of a closing tx for the RGB-PQ commitment bound to `seal`.
+fn scan_close_tx_for_commitment(client: &BtqRpcClient, txid: &str, seal: &BtqP2mrSeal) -> bool {
+    // Need blockhash for non-txindex nodes.
+    let bh: Option<String> = client
+        .call("gettransaction", &[txid.into(), true.into()])
+        .ok()
+        .and_then(|v| {
+            v.get("blockhash")
+                .and_then(|b| b.as_str().map(String::from))
+        });
+    let args: Vec<Value> = match &bh {
+        Some(h) => vec![txid.into(), true.into(), h.clone().into()],
+        None => vec![txid.into(), true.into()],
+    };
+    let v = match client.call("getrawtransaction", &args) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let vouts = match v.get("vout").and_then(|x| x.as_array()) {
+        Some(a) => a,
+        None => return false,
+    };
+    let mut hits = 0;
+    for o in vouts {
+        let spk_hex = o
+            .get("scriptPubKey")
+            .and_then(|s| s.get("hex"))
+            .and_then(|h| h.as_str())
+            .unwrap_or("");
+        let spk = match hex::decode(spk_hex) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if let Some(payload) = rgb_pq_commit::strip_op_return(&spk) {
+            if rgb_pq_commit::RgbPqCommitment::decode_for(payload, seal).is_ok() {
+                hits += 1;
+            }
+        }
+    }
+    hits == 1
 }
 
 /// Run the offline (deterministic) sub-flow. Exercises every component that

@@ -65,6 +65,21 @@ impl BtqRpcClient {
         }
     }
 
+    /// The URL to POST to: the base URL plus an optional `/wallet/<name>`
+    /// suffix when a wallet is configured (Bitcoin Core wallet-scoped RPC).
+    fn request_url(&self) -> String {
+        match &self.config.wallet {
+            Some(w) => format!("{}/wallet/{}", self.config.url, w),
+            None => self.config.url.clone(),
+        }
+    }
+
+    /// Set (or clear) the wallet context for subsequent calls. When set,
+    /// wallet-scoped RPCs route through `<url>/wallet/<name>`.
+    pub fn set_wallet(&mut self, wallet: Option<&str>) {
+        self.config.wallet = wallet.map(|w| w.to_string());
+    }
+
     /// Verify the node is on the expected chain by inspecting
     /// `getblockchaininfo`.
     pub fn verify_network(&self) -> RgbPqResult<()> {
@@ -87,6 +102,7 @@ impl BtqRpcClient {
     /// Perform a JSON-RPC call with retry on transient transport errors.
     pub fn call(&self, method: &str, params: &[Value]) -> RgbPqResult<Value> {
         let endpoint_safe = self.safe_endpoint();
+        let request_url = self.request_url();
         let body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -98,7 +114,7 @@ impl BtqRpcClient {
         for attempt in 0..=self.retries {
             let req = self
                 .agent
-                .post(&self.config.url)
+                .post(&request_url)
                 .set("Content-Type", "application/json");
             let req = match &self.config.auth {
                 crate::network::BtqAuth::UserPass { user, pass } => {
@@ -265,21 +281,33 @@ impl BtqRpcClient {
     }
 
     /// `gettxoutproof` -> [`BtqInclusionProof`].
+    ///
+    /// On nodes without `-txindex`, the tx must be in the mempool OR a
+    /// `blockhash` must be supplied. We fetch the blockhash from
+    /// `gettransaction` (wallet-scoped) when available and pass it to
+    /// `gettxoutproof`.
     pub fn get_inclusion_proof(&self, txid: &str) -> RgbPqResult<BtqInclusionProof> {
-        let proof_v = self.call("gettxoutproof", &[vec![txid.to_string()].into()])?;
+        // Try to get the blockhash via the wallet (works for wallet-owned txs).
+        let block_hash: Option<String> = self
+            .call("gettransaction", &[txid.into(), true.into()])
+            .ok()
+            .and_then(|v| {
+                v.get("blockhash")
+                    .and_then(|b| b.as_str().map(String::from))
+            });
+
+        let params: Vec<Value> = match &block_hash {
+            Some(bh) => vec![vec![txid.to_string()].into(), bh.clone().into()],
+            None => vec![vec![txid.to_string()].into()],
+        };
+        let proof_v = self.call("gettxoutproof", &params)?;
         let proof = proof_v
             .as_str()
             .ok_or_else(|| node_unavailable("gettxoutproof returned non-string"))?
             .to_string();
-        // Best-effort block hash from tx status.
-        let status = self.get_tx_status(txid)?;
-        let block_hash = match status {
-            TxStatus::Confirmed { block_hash, .. } => block_hash,
-            _ => String::new(),
-        };
         Ok(BtqInclusionProof {
             txid: txid.to_string(),
-            block_hash,
+            block_hash: block_hash.unwrap_or_default(),
             proof_hex: proof,
         })
     }
@@ -337,6 +365,7 @@ mod tests {
             },
             timeout_secs: Some(1),
             retries: Some(0),
+            wallet: None,
         }
     }
 
@@ -350,8 +379,12 @@ mod tests {
 
     #[test]
     fn node_unavailable_when_no_node() {
-        // No node running -> must return a typed NodeUnavailable, never panic.
-        let client = BtqRpcClient::new(cfg());
+        // Use a port that is guaranteed to have no node (port 9 = discard),
+        // so this test is independent of any locally-running btqd.
+        let mut c = cfg();
+        c.url = "http://127.0.0.1:9".into();
+        c.retries = Some(0);
+        let client = BtqRpcClient::new(c);
         let res = client.call("getblockchaininfo", &[]);
         let err = res.unwrap_err();
         assert!(
