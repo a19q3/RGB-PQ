@@ -105,21 +105,16 @@ impl<'a> BtqTxOps<'a> {
     /// fixture-grade).
     pub fn new_dilithium_address(&self) -> RgbPqResult<(String, String)> {
         let v = self.client.call("getnewdilithiumaddress", &[])?;
+        // The RPC may return the address as a bare string or inside a JSON
+        // object {"address": "..."}. Handle both.
         let addr = v
-            .get("address")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ResolveError::MissingTx("getnewdilithiumaddress: no address".into()))?
-            .to_string();
-        // The pubkey is exposed via validateaddress on the dilithium address.
-        let va = self
-            .client
-            .call("validateaddress", &[addr.clone().into()])?;
-        let pk = va
-            .get("pubkey")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        Ok((addr, pk))
+            .as_str()
+            .map(String::from)
+            .or_else(|| v.get("address").and_then(Value::as_str).map(String::from))
+            .ok_or_else(|| ResolveError::MissingTx("getnewdilithiumaddress: no address".into()))?;
+        // The pubkey is not directly exposed; return empty (the PKH leaf path
+        // uses the scriptPubKey via getaddressinfo instead).
+        Ok((addr, String::new()))
     }
 
     /// Create and fund a P2MR output with a single Dilithium checksig leaf.
@@ -297,6 +292,55 @@ pub fn compute_tapleaf_hash(leaf_script: &[u8]) -> [u8; 32] {
     let mut arr = [0u8; 32];
     arr.copy_from_slice(&out);
     arr
+}
+
+/// Result of a Dilithium key rotation: the new P2MR output owned by the new
+/// key, plus the leaf script of the new PQ leaf (for resolver configuration).
+#[derive(Clone, Debug)]
+pub struct RotationResult {
+    /// The new P2MR output (funded, owned by the new Dilithium key).
+    pub new_p2mr: P2mrOutput,
+    /// The new Dilithium-PKH leaf script hex (for resolver `with_pq_leaf`).
+    pub new_leaf_hex: String,
+    /// The new Dilithium address.
+    pub new_address: String,
+}
+
+impl<'a> BtqTxOps<'a> {
+    /// **Rotate the Dilithium ownership key** for a P2MR seal.
+    ///
+    /// This generates a fresh Dilithium key in the wallet, creates a new P2MR
+    /// output whose leaf is owned by that new key, and funds it. The caller
+    /// then transfers RGB state from the old seal to this new seal, and closes
+    /// the old seal. Once the old seal is closed, the old key is irrelevant.
+    ///
+    /// Returns the new P2MR output + the new leaf script hex.
+    pub fn rotate_dilithium_key(
+        &self,
+        amount_btc: f64,
+        label: &str,
+    ) -> RgbPqResult<RotationResult> {
+        // 1. Generate a new Dilithium address.
+        let new_addr = self.new_dilithium_address()?.0;
+        // 2. Get its scriptPubKey (contains the hash160 for the PKH leaf).
+        let info = self
+            .client
+            .call("getaddressinfo", &[new_addr.clone().into()])?;
+        let spk_hex = info
+            .get("scriptPubKey")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        // 3. Build the DILITHIUM_PUBKEYHASH leaf (the wallet signs this).
+        let leaf_hex = dilithium_pubkeyhash_leaf_hex(&spk_hex);
+        // 4. Fund a new P2MR output with this leaf.
+        let new_p2mr = self.create_fund_p2mr(&leaf_hex, amount_btc, label)?;
+        Ok(RotationResult {
+            new_p2mr,
+            new_leaf_hex: leaf_hex,
+            new_address: new_addr,
+        })
+    }
 }
 
 #[cfg(test)]

@@ -44,10 +44,6 @@ fn live_close_with_opret_commitment() {
 }
 
 /// Dedicated **P2MR-ret** live test. Skips cleanly when no node is reachable.
-/// When a node is present it builds a 2-leaf P2MR tree (PQ leaf + RGB
-/// commitment leaf), confirms the node-accepted root equals the Rust-computed
-/// root, funds it, spends via the PQ leaf, and verifies the commitment leaf is
-/// bound into the root.
 #[test]
 fn live_p2mr_ret_commitment() {
     let cfg = read_live_config();
@@ -58,4 +54,34 @@ fn live_p2mr_ret_commitment() {
     let steps = run_live_p2mr_ret_flow(&mut client);
     assert!(steps >= 5, "expected >=5 p2mr-ret steps, got {steps}");
     println!("[e2e-ret] P2MR-ret commitment verified ({steps} steps)");
+}
+
+/// **Dilithium key rotation** live test: generates a real Dilithium key,
+/// funds a P2MR output with a DILITHIUM_PUBKEYHASH leaf (not OP_TRUE), closes
+/// it via the PQ path, and confirms. Skips cleanly when no node.
+#[test]
+fn live_dilithium_rotation() {
+    let cfg = read_live_config();
+    let Some(mut client) = try_connect(&cfg) else {
+        eprintln!("[e2e-rot] skipping Dilithium rotation test (no BTQ node)");
+        return;
+    };
+    let steps = run_live_dilithium_rotation_flow(&mut client);
+    assert!(steps >= 4, "expected >=4 rotation steps, got {steps}");
+    println!("[e2e-rot] Dilithium key rotation verified ({steps} steps)");
+}
+
+/// **Reorg simulation** live test: closes a seal, mines 1 block, then
+/// invalidates that block to simulate a reorg, and verifies the close becomes
+/// unconfirmed. Skips cleanly when no node.
+#[test]
+fn live_reorg_simulation() {
+    let cfg = read_live_config();
+    let Some(mut client) = try_connect(&cfg) else {
+        eprintln!("[e2e-reorg] skipping reorg simulation (no BTQ node)");
+        return;
+    };
+    let steps = run_live_reorg_simulation(&mut client);
+    assert!(steps >= 5, "expected >=5 reorg steps, got {steps}");
+    println!("[e2e-reorg] reorg simulation verified ({steps} steps)");
 }

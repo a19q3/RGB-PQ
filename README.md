@@ -388,10 +388,11 @@ trust, commitment replay, cross-chain confusion, DoS defence, and the
 - [x] Real RGB transfer (`transfer_nia_btq` with genesis input wiring)
 - [x] Dilithium PQ leaf helper (`dilithium_pubkeyhash_leaf_hex`)
 - [x] ChainNet mapping invariant tests
-- [x] Reorg end-to-end integration test (indexer rollback → resolver fail-closed)
+- [x] Reorg end-to-end integration test (indexer rollback + live `invalidateblock`)
 - [x] Phase 3 — multi-protocol P2MR commitment tree (`MultiProtocolP2mrTree`)
-- [ ] Formal audit of the adapter + `ChainNet` mapping
-- [ ] Dilithium key rotation path
+- [x] Internal security audit (`docs/audit.md`, 10 findings)
+- [x] Dilithium key rotation (`rotate_dilithium_key`, live-verified with real PQ leaf)
+- [x] Strict live e2e: Dilithium leaf + key rotation + reorg simulation + both commitment schemes
 
 ## License
 

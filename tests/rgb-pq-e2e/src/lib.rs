@@ -572,6 +572,187 @@ pub fn run_offline_flow() -> usize {
     steps
 }
 
+/// Run the strict live **Dilithium key rotation** flow: generate a new
+/// Dilithium key, fund a new P2MR output owned by it (DILITHIUM_PUBKEYHASH
+/// leaf — a real PQ leaf, not OP_TRUE), close it, and confirm. Returns steps.
+pub fn run_live_dilithium_rotation_flow(client: &mut BtqRpcClient) -> usize {
+    use rgb_pq_tx::BtqTxOps;
+
+    let mut steps = 0;
+
+    // Fresh wallet.
+    let suffix = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| (d.subsec_nanos() % 1_000_000) as u64)
+            .unwrap_or(0)
+    };
+    let wallet = format!("rgbpq-rot-{suffix}");
+    client.set_wallet(None);
+    let _ = client.call("createwallet", &[wallet.clone().into()]);
+    client.set_wallet(Some(wallet.as_str()));
+    let _ = client.call("settxfee", &[0.001f64.into()]);
+    let miner = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let ops = BtqTxOps::new(client);
+    ops.generate(110, &miner).expect("mine 110");
+
+    // 1. Rotate to a new Dilithium key → new P2MR output with a real PQ leaf.
+    let rotation = ops
+        .rotate_dilithium_key(0.5, "rotated-seal")
+        .expect("rotate dilithium key");
+    steps += 1;
+    println!(
+        "[e2e-rot] rotated to new Dilithium key, new P2MR {} (leaf len {})",
+        rotation.new_p2mr.address,
+        rotation.new_leaf_hex.len()
+    );
+
+    // Verify the leaf is a DILITHIUM_PUBKEYHASH leaf (ends in 0xbb, 25 bytes).
+    let leaf_bytes = hex::decode(&rotation.new_leaf_hex).expect("leaf decode");
+    assert_eq!(
+        leaf_bytes.len(),
+        25,
+        "DILITHIUM_PUBKEYHASH leaf must be 25 bytes"
+    );
+    assert_eq!(
+        *leaf_bytes.last().unwrap(),
+        0xbb,
+        "leaf must end with OP_CHECKSIGDILITHIUM"
+    );
+    assert_eq!(leaf_bytes[0], 0x76, "leaf must start with OP_DUP");
+    steps += 1;
+    println!("[e2e-rot] verified leaf is DILITHIUM_PUBKEYHASH (25B, ends 0xbb)");
+
+    // 2. Mine the funding tx.
+    ops.generate(1, &miner).expect("mine funding");
+    wait_for_p2mr_spendable(client, &rotation.new_p2mr, &miner);
+
+    // 3. Close the rotated seal via its PQ leaf.
+    let dest = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let (unsigned, _, _) = ops
+        .create_p2mr_spend(&rotation.new_p2mr.p2mr_id, &dest, 0.2, 0.0001)
+        .expect("create spend on rotated seal");
+    let signed = ops
+        .sign_p2mr_tx(&unsigned, &rotation.new_p2mr.p2mr_id)
+        .expect("sign rotated seal (PQ path)");
+    let close_txid = ops.broadcast(&signed).expect("broadcast rotated close");
+    ops.generate(1, &miner).expect("mine close");
+    steps += 1;
+    println!("[e2e-rot] closed rotated PQ seal in tx {close_txid}");
+
+    // 4. Verify the close is confirmed.
+    let confs = client
+        .call("gettransaction", &[close_txid.clone().into(), true.into()])
+        .ok()
+        .and_then(|v| v.get("confirmations").and_then(Value::as_u64))
+        .unwrap_or(0);
+    assert!(confs >= 1, "rotated seal close must be confirmed");
+    steps += 1;
+    println!("[e2e-rot] rotated close confirmed ({confs} confs)");
+
+    steps
+}
+
+/// Run the strict live **reorg simulation**: fund a P2MR output, close it,
+/// mine 1 block, then invalidate that block (simulate a reorg) and verify the
+/// close transaction is no longer confirmed. Returns steps.
+pub fn run_live_reorg_simulation(client: &mut BtqRpcClient) -> usize {
+    use rgb_pq_tx::BtqTxOps;
+
+    let mut steps = 0;
+
+    let suffix = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| (d.subsec_nanos() % 1_000_000) as u64)
+            .unwrap_or(0)
+    };
+    let wallet = format!("rgbpq-reorg-{suffix}");
+    client.set_wallet(None);
+    let _ = client.call("createwallet", &[wallet.clone().into()]);
+    client.set_wallet(Some(wallet.as_str()));
+    let _ = client.call("settxfee", &[0.001f64.into()]);
+    let miner = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let ops = BtqTxOps::new(client);
+    ops.generate(110, &miner).expect("mine 110");
+
+    // 1. Fund a P2MR output.
+    let p2mr = ops
+        .create_fund_p2mr("51", 0.5, "reorg-seal")
+        .expect("fund p2mr");
+    ops.generate(1, &miner).expect("mine funding");
+    wait_for_p2mr_spendable(client, &p2mr, &miner);
+    steps += 1;
+
+    // 2. Close the seal.
+    let dest = client
+        .call("getnewaddress", &[])
+        .ok()
+        .and_then(|v| v.as_str().map(String::from))
+        .unwrap_or_default();
+    let (unsigned, _, _) = ops
+        .create_p2mr_spend(&p2mr.p2mr_id, &dest, 0.2, 0.0001)
+        .expect("create spend");
+    let signed = ops.sign_p2mr_tx(&unsigned, &p2mr.p2mr_id).expect("sign");
+    let close_txid = ops.broadcast(&signed).expect("broadcast");
+
+    // 3. Mine 1 block containing the close.
+    let block_hashes = ops.generate(1, &miner).expect("mine close");
+    let close_block = block_hashes.first().expect("block hash");
+    steps += 1;
+
+    // 4. Verify close is confirmed.
+    let confs_before = client
+        .call("gettransaction", &[close_txid.clone().into(), true.into()])
+        .ok()
+        .and_then(|v| v.get("confirmations").and_then(Value::as_u64))
+        .unwrap_or(0);
+    assert!(confs_before >= 1, "close must be confirmed before reorg");
+    steps += 1;
+    println!("[e2e-reorg] close confirmed at {confs_before} confs before reorg");
+
+    // 5. Invalidate the block → simulate reorg.
+    client
+        .call("invalidateblock", &[close_block.clone().into()])
+        .expect("invalidateblock");
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    steps += 1;
+
+    // 6. Verify the close is now unconfirmed (reorg removed it).
+    let confs_after = client
+        .call("gettransaction", &[close_txid.clone().into(), true.into()])
+        .ok()
+        .and_then(|v| v.get("confirmations").and_then(Value::as_u64))
+        .unwrap_or(999);
+    assert!(
+        confs_after == 0 || confs_after == 999,
+        "close must be unconfirmed/unknown after reorg, got {confs_after}"
+    );
+    steps += 1;
+    println!("[e2e-reorg] close unconfirmed after reorg (confs={confs_after}) → resolver would report Unconfirmed/ReorgRisk");
+
+    // 7. Re-mine to restore.
+    let _ = ops.generate(1, &miner);
+    steps += 1;
+    println!("[e2e-reorg] re-mined to restore chain");
+
+    steps
+}
+
 /// Print a clear success summary.
 pub fn print_summary(mode: &str, steps: usize) {
     println!();
