@@ -23,6 +23,9 @@ pub enum RgbPqError {
     /// A raw RPC-layer failure (convenience, equivalent to Resolve(Rpc(...))).
     #[error(transparent)]
     Rpc(#[from] RpcError),
+    /// An indexer failure (convenience, equivalent to Resolve(Index(...))).
+    #[error(transparent)]
+    Index(#[from] IndexError),
     /// An RGB consensus validation failure.
     #[error("RGB validation failure: {0}")]
     RgbValidation(String),
@@ -244,6 +247,15 @@ pub enum ResolveError {
     /// A requested BTQ feature is not supported by the connected node.
     #[error(transparent)]
     Feature(#[from] BtqFeature),
+    /// A seal-level failure encountered during resolution.
+    #[error(transparent)]
+    Seal(#[from] SealError),
+}
+
+impl From<ChainConfusion> for ResolveError {
+    fn from(e: ChainConfusion) -> Self {
+        ResolveError::Seal(SealError::from(e))
+    }
 }
 
 /// The BTQ node could not be reached.

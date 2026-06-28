@@ -12,7 +12,7 @@ rgb-pq-core = { path = "../rgb-pq-core" }
 rgb-pq-seal = { path = "../rgb-pq-seal" }
 rgb-pq-commit = { path = "../rgb-pq-commit" }
 rgb-pq-chain = { path = "../rgb-pq-chain" }
-rgb-consensus = { workspace = true }
+rgbcore = { package = "rgb-consensus", workspace = true }
 bitcoin = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }

@@ -28,5 +28,6 @@ pub mod commitment;
 
 pub use anchor::{embed_opret_commitment, verify_opret_anchor, OpretAnchorError};
 pub use commitment::{
-    CommitmentPayload, RgbPqCommitment, COMMITMENT_MAGIC, COMMITMENT_PROTOCOL_TAG,
+    strip_op_return, CommitmentPayload, MpcCommitment, RgbPqCommitment, COMMITMENT_MAGIC,
+    COMMITMENT_PROTOCOL_TAG,
 };

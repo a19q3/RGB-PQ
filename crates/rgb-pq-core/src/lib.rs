@@ -19,9 +19,9 @@ pub mod error;
 
 pub use domain::{Domain, DOMAIN_SEPARATION_VERSION, DOMAIN_TAG};
 pub use error::{
-    BtqFeature, ChainConfusion, CommitmentError, IndexError, MalformedSealError,
-    OwnerAlgoError, ResolveError, RgbPqError, RpcError, SealError, SealStateError,
-    UnsupportedFeature,
+    BtqFeature, ChainConfusion, CommitmentError, IndexError, InvalidSealCloseReason,
+    MalformedSealError, NodeUnavailable, OwnerAlgoError, ResolveError, RgbPqError, RpcError,
+    SealError, SealStateError, UnknownSealStateReason, UnsupportedFeature,
 };
 
 /// Convenience alias for the crate's fallible return type.
