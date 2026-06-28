@@ -1401,32 +1401,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rgb-consensus"
-version = "0.11.1-rc.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "535483ee9143782e33ddebd3eda465de0184061fc3c480e24990e42fefc58bb0"
-dependencies = [
- "amplify",
- "baid64",
- "base85",
- "bitcoin",
- "chrono",
- "daggy",
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "hex-conservative 0.2.2",
- "mime",
- "rand 0.9.4",
- "rgb-aluvm",
- "rgb-strict-encoding",
- "rgb-strict-types",
- "ripemd",
- "secp256k1",
- "sha2",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "rgb-invoicing"
 version = "0.11.1-rc.10"
 dependencies = [
@@ -1437,7 +1411,7 @@ dependencies = [
  "indexmap",
  "percent-encoding",
  "rand 0.9.4",
- "rgb-consensus 0.11.1-rc.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rgb-consensus",
  "rgb-strict-encoding",
  "rgb-strict-types",
 ]
@@ -1456,7 +1430,7 @@ dependencies = [
  "rand 0.9.4",
  "rgb-aluvm",
  "rgb-ascii-armor",
- "rgb-consensus 0.11.1-rc.10 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rgb-consensus",
  "rgb-invoicing",
  "rgb-strict-encoding",
  "rgb-strict-types",
@@ -1490,7 +1464,7 @@ dependencies = [
  "hex",
  "proptest",
  "rand 0.8.6",
- "rgb-consensus 0.11.1-rc.10",
+ "rgb-consensus",
  "rgb-pq-core",
  "rgb-pq-seal",
  "sha2",
@@ -1532,7 +1506,7 @@ dependencies = [
  "hex",
  "log",
  "proptest",
- "rgb-consensus 0.11.1-rc.10",
+ "rgb-consensus",
  "rgb-pq-chain",
  "rgb-pq-commit",
  "rgb-pq-core",
@@ -1547,12 +1521,14 @@ dependencies = [
  "bitcoin",
  "hex",
  "log",
- "rgb-consensus 0.11.1-rc.10",
+ "rgb-consensus",
  "rgb-ops",
  "rgb-pq-chain",
  "rgb-pq-commit",
  "rgb-pq-core",
+ "rgb-pq-resolver",
  "rgb-pq-seal",
+ "rgb-schemas",
  "thiserror 1.0.69",
 ]
 
@@ -1585,6 +1561,16 @@ dependencies = [
  "serde_json",
  "sha2",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "rgb-schemas"
+version = "0.11.1-rc.10"
+dependencies = [
+ "amplify",
+ "rgb-aluvm",
+ "rgb-ops",
+ "rgb-strict-types",
 ]
 
 [[package]]

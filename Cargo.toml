@@ -32,6 +32,17 @@ homepage = "https://github.com/rgb-pq/rgb-pq"
 repository = "https://github.com/rgb-pq/rgb-pq"
 description = "RGB-style client-side validated assets using BTQ P2MR outputs as post-quantum single-use seals"
 
+# ---------------------------------------------------------------------------
+# Force the entire dependency graph to use the VENDORED rgb-protocol crates
+# (same versions) instead of pulling them from crates.io. This makes the
+# workspace fully self-contained and avoids "multiple versions of rgbstd"
+# when rgb-schemas transitively depends on rgb-ops.
+# ---------------------------------------------------------------------------
+[patch.crates-io]
+rgb-consensus = { path = "external/rgb-consensus" }
+rgb-ops       = { path = "external/rgb-ops" }
+rgb-schemas   = { path = "external/rgb-schemas" }
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 
@@ -48,9 +59,11 @@ cargo = { level = "warn", priority = -1 }
 rgb-consensus = { path = "external/rgb-consensus" }        # lib name: rgbcore
 rgb-ops       = { path = "external/rgb-ops" }              # lib name: rgbstd
 rgb-schemas   = { path = "external/rgb-schemas" }          # lib name: schemata
-# Convenience alias so crates can write `rgbcore = { workspace = true }` while
-# still resolving to the rgb-consensus package (whose lib is named `rgbcore`).
+# Convenience aliases so crates can write `rgbcore/rgbstd/schemata = { workspace = true }`
+# while resolving to the rgb-consensus / rgb-ops / rgb-schemas packages.
 rgbcore       = { package = "rgb-consensus", path = "external/rgb-consensus" }
+rgbstd        = { package = "rgb-ops",       path = "external/rgb-ops" }
+schemata      = { package = "rgb-schemas",   path = "external/rgb-schemas" }
 
 # Pinned to RGB's own bitcoin version so OutPoint/Txid/Transaction types line
 # up across the boundary (RGB v0.11.1 uses bitcoin 0.32).
