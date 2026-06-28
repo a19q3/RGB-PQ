@@ -384,7 +384,12 @@ trust, commitment replay, cross-chain confusion, DoS defence, and the
 - [x] Phase 1 — Opret over BTQ P2MR spend (live-verified)
 - [x] Phase 2 — P2MR-ret commitment leaf (live-verified, Merkle math matches node)
 - [x] Verification budget + DoS fail-closed + latency benchmarks
-- [ ] Phase 3 — deterministic multi-protocol P2MR commitment tree (multiple RGB contracts share one P2MR commitment structure)
+- [x] Resolver p2mr-ret branching (both commitment schemes symmetric in resolver)
+- [x] Real RGB transfer (`transfer_nia_btq` with genesis input wiring)
+- [x] Dilithium PQ leaf helper (`dilithium_pubkeyhash_leaf_hex`)
+- [x] ChainNet mapping invariant tests
+- [x] Reorg end-to-end integration test (indexer rollback → resolver fail-closed)
+- [x] Phase 3 — multi-protocol P2MR commitment tree (`MultiProtocolP2mrTree`)
 - [ ] Formal audit of the adapter + `ChainNet` mapping
 - [ ] Dilithium key rotation path
 

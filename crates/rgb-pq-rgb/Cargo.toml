@@ -20,6 +20,8 @@ rgb-pq-resolver = { path = "../rgb-pq-resolver" }
 rgb-consensus = { workspace = true }
 rgb-ops = { workspace = true, features = ["fs"] }
 rgb-schemas = { workspace = true }
+amplify = "=4.8.1"
+strict_encoding = { package = "rgb-strict-encoding", version = "~1.0.1" }
 bitcoin = { workspace = true }
 hex = { workspace = true }
 thiserror = { workspace = true }

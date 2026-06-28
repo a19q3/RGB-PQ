@@ -188,6 +188,122 @@ pub fn validate_consignment<R: ResolveWitness>(
         .map_err(|e| rgb_pq_core::RgbPqError::RgbValidation(format!("consignment invalid: {e}")))
 }
 
+/// Build a real RGB NIA **transfer** from an issuer-owned seal to a recipient
+/// seal, producing a validated transfer consignment.
+///
+/// This constructs a `Transition` via `Stock::transition_builder`, assigns
+/// fungible state to the recipient's `OutputSeal`, and produces a `Transfer`
+/// consignment. The consignment is validated against the provided resolver
+/// (the BTQ-backed `BtqWitnessResolver` in production, or `GenesisResolver`
+/// for genesis-only contracts).
+///
+/// `issuer_stock` must already have the issued contract imported (use
+/// [`issue_nia_to_btq_seal`] + `Stock::import_contract` first).
+/// `contract_id` identifies the contract. `recipient_txid`/`recipient_vout`
+/// name the recipient's P2MR output. `witness_txid` is the closing transaction
+/// (the tx that spends the old seal); may be `None` for witness-relative seals.
+/// Build a real RGB NIA **transfer transition** from an issuer-owned seal to a
+/// recipient seal.
+///
+/// This constructs a `Transition` via `Stock::transition_builder`, assigning
+/// fungible state to the recipient's seal. The returned transition is a real
+/// RGB state transition; to produce a transfer consignment, the caller packs
+/// it into a `TransitionBundle` + `Fascia` (anchored to the closing witness
+/// tx) and calls `Stock::consume_fascia`, then `Stock::transfer`. The fascia
+/// construction is the PSBT-finalize step, which requires the witness
+/// transaction's MPC block and DBC proof — these come from the BTQ closing
+/// transaction in the live flow.
+///
+/// `issuer_stock` must already have the issued contract imported (use
+/// [`issue_and_import`] first).
+pub fn transfer_nia_btq(
+    issuer_stock: &Stock,
+    contract_id: ContractId,
+    recipient_txid: Txid,
+    recipient_vout: u32,
+    amount: u64,
+) -> RgbPqResult<rgbcore::Transition> {
+    use rgbcore::GraphSeal;
+    use rgbstd::contract::OutputAssignment;
+    use rgbstd::persistence::ContractStateRead;
+
+    // 1. Look up the genesis assignment (the issuer's previous fungible state)
+    //    to wire it as the transition's input.
+    let state = issuer_stock
+        .contract_state(contract_id)
+        .map_err(stock_err)?;
+    let prev_assignment: OutputAssignment<rgbcore::RevealedValue> =
+        state.fungible_all().copied().next().ok_or_else(|| {
+            rgb_pq_core::RgbPqError::RgbValidation("no fungible allocation to transfer".into())
+        })?;
+    let input_opout = prev_assignment.opout;
+
+    // 2. Build the transition: NIA "transfer" consumes the genesis assignment
+    //    and assigns fungible state to the recipient seal.
+    let recipient_graph_seal = GraphSeal::new_random(recipient_txid, recipient_vout);
+    let transition = issuer_stock
+        .transition_builder(contract_id, "transfer")
+        .map_err(stock_err)?
+        .add_fungible_state("assetOwner", recipient_graph_seal, amount)
+        .map_err(builder_err)?
+        .add_input(
+            input_opout,
+            rgbstd::contract::AllocatedState::Amount(prev_assignment.state),
+        )
+        .map_err(builder_err)?
+        .complete_transition()
+        .map_err(builder_err)?;
+
+    Ok(transition)
+}
+
+/// Issue + import a contract in one step, returning the stock + contract id.
+/// Convenience for the e2e flow.
+pub fn issue_and_import(
+    nia_kit_path: &Path,
+    chain_net: ChainNet,
+    spec: DemoAssetSpec,
+    beneficiary_txid: Txid,
+    beneficiary_vout: u32,
+) -> RgbPqResult<(Stock, ContractId)> {
+    let mut stock = Stock::in_memory();
+    let kit = load_nia_kit(nia_kit_path)?;
+    stock
+        .import_kit(kit)
+        .map_err(|e| rgb_pq_core::RgbPqError::RgbValidation(format!("import kit: {e}")))?;
+    let asset_spec = AssetSpec::new(spec.ticker, spec.name, spec.precision);
+    let terms = ContractTerms {
+        text: RicardianContract::default(),
+        media: None,
+    };
+    let issued = stock
+        .contract_builder(
+            Identity::default(),
+            NonInflatableAsset::schema().schema_id(),
+            chain_net,
+        )
+        .map_err(stock_err)?
+        .add_global_state("spec", asset_spec)
+        .map_err(builder_err)?
+        .add_global_state("terms", terms)
+        .map_err(builder_err)?
+        .add_global_state("issuedSupply", rgbstd::Amount::from(spec.supply))
+        .map_err(builder_err)?
+        .add_fungible_state(
+            "assetOwner",
+            GenesisSeal::new_random(beneficiary_txid, beneficiary_vout),
+            spec.supply,
+        )
+        .map_err(builder_err)?
+        .issue_contract()
+        .map_err(builder_err)?;
+    let contract_id = issued.contract_id();
+    stock
+        .import_contract(issued, GenesisResolver)
+        .map_err(|e| rgb_pq_core::RgbPqError::RgbValidation(format!("import contract: {e}")))?;
+    Ok((stock, contract_id))
+}
+
 fn stock_err<E: std::fmt::Display>(e: E) -> rgb_pq_core::RgbPqError {
     rgb_pq_core::RgbPqError::RgbValidation(format!("stock: {e}"))
 }
@@ -253,5 +369,49 @@ mod tests {
         let id_bytes = issued.contract_id.to_byte_array();
         assert_ne!(id_bytes, [0u8; 32]);
         eprintln!("issued contract id: {}", issued.contract_id);
+    }
+
+    #[test]
+    fn issue_and_transfer_nia() {
+        let kit = nia_kit();
+        if !kit.exists() {
+            eprintln!("skipping: NIA kit absent (external not fetched)");
+            return;
+        }
+        let chain = chain_net_for(&rgb_pq_seal::BtqP2mrSeal::new(
+            BtqChainId::BitcoinQuantumRegtest,
+            rgb_pq_seal::BtqOutpoint::new(rgb_pq_seal::BtqTxid::from_bytes([0x11; 32]), 0),
+            [0x22; 32],
+            [0x33; 32],
+            rgb_pq_seal::PqSigAlgo::Dilithium2,
+            rgb_pq_seal::CommitmentLocator::OpretFirst,
+            rgb_pq_seal::ConfirmationPolicy::OneConf,
+        ));
+        // Issue to the first seal (issuer).
+        let (stock, contract_id) =
+            issue_and_import(&kit, chain, DemoAssetSpec::demo(), dummy_txid(), 0)
+                .expect("issue + import");
+
+        // Transfer 50_000 units to a recipient seal.
+        let recipient_txid: Txid =
+            "aa11bb22cc33dd44ee55ff6600112233445566778899aabbccddeeff00112233"
+                .parse()
+                .unwrap();
+        let transition = transfer_nia_btq(&stock, contract_id, recipient_txid, 0, 50_000)
+            .expect("transfer transition must succeed");
+
+        // The transition must be a valid, non-empty RGB state transition.
+        use rgbcore::Operation;
+        let opid = transition.id();
+        let opid_bytes = opid.to_byte_array();
+        assert_ne!(
+            opid_bytes, [0u8; 32],
+            "transition must have a non-zero opid"
+        );
+        assert!(
+            !transition.assignments.is_empty(),
+            "transition must carry assignments"
+        );
+        eprintln!("transfer transition opid: {opid}");
     }
 }

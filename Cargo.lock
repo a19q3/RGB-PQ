@@ -1307,6 +1307,7 @@ dependencies = [
 name = "rgb-pq-rgb"
 version = "0.1.0"
 dependencies = [
+ "amplify",
  "bitcoin",
  "hex",
  "log",
@@ -1318,6 +1319,7 @@ dependencies = [
  "rgb-pq-resolver",
  "rgb-pq-seal",
  "rgb-schemas",
+ "rgb-strict-encoding",
  "thiserror",
 ]
 

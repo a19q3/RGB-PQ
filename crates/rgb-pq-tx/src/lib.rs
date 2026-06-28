@@ -56,6 +56,9 @@ pub fn dilithium_checksig_leaf_hex(pubkey_hex: &str) -> String {
     let mut script = Vec::with_capacity(3 + len + 1);
     if len <= 0x4b {
         script.push(len as u8);
+    } else if len <= 0xff {
+        script.push(0x4c); // PUSHDATA1
+        script.push(len as u8);
     } else {
         // PUSHDATA2
         script.push(0x4d);
@@ -65,6 +68,21 @@ pub fn dilithium_checksig_leaf_hex(pubkey_hex: &str) -> String {
     script.extend_from_slice(&pk);
     script.push(PqSigAlgo::CHECKSIG_OPCODE); // OP_CHECKSIGDILITHIUM = 0xbb
     hex::encode(&script)
+}
+
+/// Build a DILITHIUM_PUBKEYHASH leaf script (hex) from a Dilithium address's
+/// scriptPubKey. This is the wallet-signable PQ ownership leaf: the wallet
+/// recognises `OP_DUP OP_HASH160 <pkh> OP_EQUALVERIFY OP_CHECKSIGDILITHIUM`
+/// (25 bytes) and signs it with its Dilithium key.
+///
+/// `dilithium_spk_hex` is the scriptPubKey from `getaddressinfo` on a
+/// Dilithium address (format: `76a914<20-byte-pkh>88bb`).
+pub fn dilithium_pubkeyhash_leaf_hex(dilithium_spk_hex: &str) -> String {
+    // The Dilithium P2PKH scriptPubKey IS the leaf script directly:
+    // OP_DUP OP_HASH160 <push20> <pkh> OP_EQUALVERIFY OP_CHECKSIGDILITHIUM
+    // = 76 a9 14 <20 bytes> 88 bb  (25 bytes total)
+    // The wallet's Solver matches this as TxoutType::DILITHIUM_PUBKEYHASH.
+    dilithium_spk_hex.to_string()
 }
 
 /// The P2MR tree JSON (DFS leaf list) for a single Dilithium checksig leaf.

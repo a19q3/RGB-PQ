@@ -192,4 +192,39 @@ mod tests {
             Err(WitnessResolverError::WrongChainNet)
         );
     }
+
+    #[test]
+    fn chainnet_stand_in_hash_is_documented_and_stable() {
+        // The ChainNet stand-in maps BTQ → a Bitcoin ChainNet variant. The
+        // stand-in's chain_hash() is a Bitcoin genesis hash, NOT BTQ's. This
+        // test documents that the stand-in hash is stable and known-different
+        // from a zero hash (it's a real Bitcoin genesis hash).
+        let regtest_hash = ChainNetMapping::stand_in_chain_hash(BtqChainId::BitcoinQuantumRegtest);
+        let testnet_hash = ChainNetMapping::stand_in_chain_hash(BtqChainId::BitcoinQuantumTestnet);
+        // Both must be non-zero (real genesis hashes).
+        assert_ne!(regtest_hash, [0u8; 32]);
+        assert_ne!(testnet_hash, [0u8; 32]);
+        // They must differ (regtest ≠ testnet genesis).
+        assert_ne!(regtest_hash, testnet_hash);
+        // The stand-in hash is a Bitcoin hash, not a BTQ hash. This is the
+        // documented compromise: RGB uses ChainNet only for validation
+        // plumbing; the real chain identity is enforced by the BTQ seal's
+        // chain_id field + verify_network().
+    }
+
+    #[test]
+    fn chainnet_mapping_is_exhaustive_for_btq() {
+        // Every supported BtqChainId must have a mapping.
+        for chain in [
+            BtqChainId::BitcoinQuantumRegtest,
+            BtqChainId::BitcoinQuantumTestnet,
+        ] {
+            let net = ChainNetMapping::chain_net(chain);
+            // Must be a Bitcoin variant (not Liquid).
+            assert!(matches!(
+                net,
+                ChainNet::BitcoinRegtest | ChainNet::BitcoinTestnet3
+            ));
+        }
+    }
 }
